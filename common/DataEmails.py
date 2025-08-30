@@ -19,9 +19,21 @@ class OutlookStandarFolders(int, Enum):
     ROOT = 0  # Root
     
 class IMPORTANCEEMAIL(int, Enum):
-    HIGH = 1
-    NORMAL = 2
-    LOW = 3
+    LOW = 0
+    NORMAL = 1
+    HIGH = 2
+
+class LOGICOPERATOR(str, Enum):
+    AND = 'AND'
+    OR = 'OR'
+
+class SUBJECTPREFIX(str, Enum):
+    RE = 'Re:'
+    FWD = 'Fwd:'
+    RV = 'RV:'
+    TR = 'Tr:'
+    RES = 'Res:'
+    ENC = 'Enc:'
 
 class QUERYDASL(str, Enum):
     SUBJECT = 'urn:schemas:mailheader:subject' # Asunto del correo
@@ -54,13 +66,22 @@ class DataFiltersEmails(BaseModel):
     recipient: Optional[list[str]] = None
     sender_email: Optional[list[str]] = None  # Lista de emails del remitente
     recipient_email: Optional[list[str]] = None  # Lista de emails del destinatario
+    cc_email: Optional[list[str]] = None  # Lista de emails en copia
+    bcc_email: Optional[list[str]] = None  # Lista de emails en copia oculta
+    cc: Optional[list[str]] = None  # Lista de nombres en copia
+    bcc: Optional[list[str]] = None  # Lista de nombres en copia oculta
     has_attachments: Optional[bool] = None
     is_read: Optional[bool] = None
-    received_after: Optional[datetime] = None  # ISO format date string
-    received_before: Optional[datetime] = None  # ISO format date string
+    received_after: Optional[str] = None  # ISO format date string
+    received_before: Optional[str] = None  # ISO format date string
     conversation_topic: Optional[str] = None  # Corresponde al asunto del hilo de conversación (conversation topic)
+    referenceid: Optional[list[str]] = None  # Corresponde al Message-ID de los emails referenciados (header References)
     msg_id: Optional[str] = None  # Corresponde al Message-ID del email (header)
     importance_email: Optional[IMPORTANCEEMAIL] = None  # IMPORTANCEEMAIL Enum
+    logic_operator: Optional[LOGICOPERATOR] = LOGICOPERATOR.AND  # 'AND' o 'OR'
+    logic_operator_between_senders: Optional[LOGICOPERATOR] = LOGICOPERATOR.OR  # 'AND' o 'OR' entre los remitentes
+    logic_operator_between_recipients: Optional[LOGICOPERATOR] = LOGICOPERATOR.OR  # 'AND' o 'OR' entre los destinatarios
+    subject_prefix: Optional[SUBJECTPREFIX] = None  # Prefijo del asunto (Re:, Fwd:, etc.)
 
     @field_validator('sender', 'recipient', mode='before')
     def validate_email_format(cls, v):
@@ -94,9 +115,10 @@ class DataFiltersEmails(BaseModel):
 class DataGetEmails(BaseModel):
     standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
     custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
-    max_emails: Optional[int] = 1000  # Número máximo de emails a obtener
+    max_emails: Optional[int] = 100  # Número máximo de emails a obtener
     filters: Optional[DataFiltersEmails] = None
     mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
+    page_next: Optional[int] = None # Página siguiente a obtener, si es None, se obtiene la primera página
     
     @field_validator('custom_folder', mode='before')
     def validate_custom_folder(cls, v):
