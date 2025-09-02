@@ -4,16 +4,23 @@ import win32com.client
 import re
 import datetime
 import pandas as pd
+from time import time
+from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis
+from ..common import OUTLOOKTYPERECIPENTS
+import os
 
 class OutlookEmail(EmailInterface):
 
     def __init__(self, conn: win32com.client.CDispatch):
         self._conn = conn # Este es el objeto Namespace autenticado
+        self.tiempo_transformacion_datos_acumulado = 0
+        self.tiempo_descarga_acumulado = 0
         
     
     def get_emails(self, datagetemails: DataGetEmails):
         
         
+        start=time()
         #########################################################################################
         #####          Obtengo todos los parámetros para descagar los emails            #########
         #########################################################################################
@@ -24,6 +31,10 @@ class OutlookEmail(EmailInterface):
         self.max_emails = datagetemails.max_emails
         self.mark_as_read = datagetemails.mark_as_read
         self.page_next = datagetemails.page_next
+        self.tiempo_descarga = 0
+        self.tiempo_transformacion_datos = 0
+        self.tiempo_transformacion_datos_acumulado = 0 if self.page_next is None else self.tiempo_transformacion_datos_acumulado
+        self.tiempo_descarga_acumulado = 0 if self.page_next is None else self.tiempo_descarga_acumulado
         
         
         #########################################################################################
@@ -35,6 +46,8 @@ class OutlookEmail(EmailInterface):
             self.query = self.create_query(self.datafilter)
         else:
             self.query = None
+            
+        print(f"Query creado: {self.query}")
             
         #########################################################################################
         #####               Obtengo los emails según los parámetros                     #########
@@ -51,7 +64,11 @@ class OutlookEmail(EmailInterface):
             
         
         filtered_messages.Sort("ReceivedTime", True)  # Ordenar por fecha de recepción descendente
-            
+        
+        self.tiempo_transformacion_datos = time() - start
+        tiempo_transformacion_datos_acumulado = self.tiempo_transformacion_datos + self.tiempo_transformacion_datos_acumulado
+        tiempo_transformacion_datos = segundos_a_horas_minutos_segundos(tiempo_transformacion_datos_acumulado)
+
         self.total_emails = filtered_messages.Count
         self.page_number = 1 if self.page_next is None else self.page_next
         self.page_size = self.max_emails
@@ -61,49 +78,92 @@ class OutlookEmail(EmailInterface):
         filtered_messages = filtered_messages[self.start:self.end]
         
         self.page_next_result = self.page_number + 1 if self.end < self.total_emails else None
+        
 
 
         emails = []
         
-        for i, message in enumerate(filtered_messages):
-            if not self.query and i >= self.max_emails:
-                break
-            
-            email_data = {
-                'Subject': message.Subject,
-                'Sender': f"{message.SenderName} ({message.SenderEmailAddress})",
-                'To':"; ".join([f"{recipient.Name} ({recipient.Address})" for recipient in message.Recipients]),
-                'CC':"; ".join([f"{cc.Name} ({cc.Address})" for cc in message.CC]),
-                'BCC':"; ".join([f"{bcc.Name} ({bcc.Address})" for bcc in message.BCC]),
-                'ReceivedTime': message.ReceivedTime,
-                'SentOn': message.SentOn,
-                'Body': message.Body,
-                'HTMLBody': message.HTMLBody,
-                'Num_of_Attachments': message.Attachments.Count,
-                'IsRead': message.UnRead == 0,
-                'Importance': "LOW" if message.Importance == 0 else "NORMAL" if message.Importance == 1 else "HIGH" if message.Importance == 2 else "Unknown",
-                'ConversationTopic': message.ConversationTopic,
-                'ConversationID': message.ConversationID,
-                'MessageID': message.EntryID,
-                'MessageClass': message.MessageClass,
-                'Categories': message.Categories,
-                'Size': message.Size,
-                'Attachments': [(att.FileName, att.EntryID) for att in message.Attachments],
-            }
+        start=time()
+        
+        for i, message in enumerate(filtered_messages, start=self.start):
+            message_class = getattr(message, 'MessageClass', None)
+            is_mail = message_class == 'IPM.Note'
+            is_appointment = message_class in ['IPM.Appointment', 'IPM.Schedule.Meeting.Request']
+
+            if is_mail:
+                email_data = {
+                    'Tipo': 'Correo',
+                    'Subject': remove_emojis(getattr(message, 'Subject', None)),
+                    'Sender': f"{self.get_sender_str(message)}",
+                    'To': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.TO.value)}",
+                    'CC': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.CC.value)}",
+                    'BCC': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.BCC.value)}",
+                    'ReceivedTime': getattr(message, 'ReceivedTime', None),
+                    'SentOn': getattr(message, 'SentOn', None),
+                    'Body': remove_emojis(getattr(message, 'Body', None)),
+                    'HTMLBody': remove_emojis(getattr(message, 'HTMLBody', None)),
+                    'Num_of_Attachments': getattr(getattr(message, 'Attachments', None), 'Count', 0),
+                    'IsRead': getattr(message, 'UnRead', None) == 0,
+                    'Importance': "LOW" if getattr(message, 'Importance', None) == 0 else "NORMAL" if getattr(message, 'Importance', None) == 1 else "HIGH" if getattr(message, 'Importance', None) == 2 else "Unknown",
+                    'ConversationTopic': getattr(message, 'ConversationTopic', None),
+                    'ConversationID': getattr(message, 'ConversationID', None),
+                    'MessageID': getattr(message, 'EntryID', None),
+                    'MessageClass': message_class,
+                    'Categories': getattr(message, 'Categories', None),
+                    'Size': getattr(message, 'Size', None),
+                    'Attachments': [(getattr(att, 'FileName', None), getattr(att, 'Index', None)) for att in getattr(message, 'Attachments', [])] if getattr(message, 'Attachments', None) and hasattr(getattr(message, 'Attachments', None), '__iter__') else []
+                }
+            elif is_appointment:
+                email_data = {
+                    'Tipo': 'Cita/Reunión',
+                    'Subject': getattr(message, 'Subject', None),
+                    'Organizer': f"{self.get_organizer_smtp(message)}",
+                    'Start': getattr(message, 'Start', None),
+                    'End': getattr(message, 'End', None),
+                    'Body': getattr(message, 'Body', None),
+                    'HTMLBody': getattr(message, 'HTMLBody', None),
+                    'Recipients': f"{self.get_recipients_str(message, None)}",  # O ajusta para todos los tipos si lo deseas
+                    'MessageClass': message_class,
+                    'Categories': getattr(message, 'Categories', None),
+                    'Attachments': [(getattr(att, 'FileName', None), getattr(att, 'Index', None)) for att in getattr(message, 'Attachments', [])] if getattr(message, 'Attachments', None) and hasattr(getattr(message, 'Attachments', None), '__iter__') else []
+                }
+            else:
+                email_data = {
+                    'Tipo': f'Otro ({message_class})',
+                    'Subject': getattr(message, 'Subject', None),
+                    'MessageClass': message_class,
+                }
             emails.append(email_data)
+            self.tiempo_descarga = time() - start
+            tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
+            os.system('cls')
+            print(f"""
+                  -------------------------------------------------------------------------------------------------
+                        Total Emails to download --> {self.total_emails}, current_page --> {self.page_number}, page_size --> {self.page_size}
+                        Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
+                        Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
+                        Tiempo en descarga de datos --> {segundos_a_horas_minutos_segundos(tiempo_descarga_acumulado)}
+                  --------------------------------------------------------------------------------------------------""")
             
         df_emails = pd.DataFrame(emails)
         
+        self.tiempo_transformacion_datos_acumulado = 0 if self.page_next_result is None else tiempo_transformacion_datos_acumulado
+        self.tiempo_descarga_acumulado = 0 if self.page_next_result is None else tiempo_descarga_acumulado
+        
         result = {
-            "data": df_emails,
+            "data": df_emails.astype(str),
             "page_number": self.page_number,
             "page_size": self.page_size,
             "total_emails": self.total_emails,
-            "has_next_page": self.end < self.total_emails,
+            "has_more": self.end < self.total_emails,
             "page_next": self.page_next_result
         }
 
         return result
+    
+    
+    
+    
 
     def create_query (self, datafilters: DataFiltersEmails) -> str:
         query_header = "@SQL= ("
@@ -235,3 +295,69 @@ class OutlookEmail(EmailInterface):
         return query
         
          
+    def get_sender_smtp(self, message) -> str:
+        sender = getattr(message, 'Sender', None)
+        if sender is not None:
+            # Si es un usuario de Exchange, intenta obtener el correo SMTP real
+            if getattr(message, 'SenderEmailType', None) == 'EX':
+                exchange_user = getattr(sender, 'GetExchangeUser', lambda: None)()
+                if exchange_user is not None:
+                    return getattr(exchange_user, 'PrimarySmtpAddress', None)
+            # Si no es Exchange, usa el campo estándar
+            return getattr(message, 'SenderEmailAddress', None)
+        return None
+    
+    def get_sender_str(self, message) -> str:
+        sender_name = getattr(message, 'SenderName', '') or ''
+        sender_email = self.get_sender_smtp(message) or ''
+        if sender_name and sender_email:
+            sender_str = f"{sender_name} ({sender_email})"
+        elif sender_name:
+            sender_str = sender_name
+        elif sender_email:
+            sender_str = sender_email
+        else:
+            sender_str = ''
+            
+        return sender_str
+        
+    def get_recipient_smtp(self, recipient) -> str:
+        address_entry = getattr(recipient, 'AddressEntry', None)
+        if address_entry is not None:
+            if getattr(address_entry, 'Type', None) == 'EX':
+                exchange_user = getattr(address_entry, 'GetExchangeUser', lambda: None)()
+                if exchange_user is not None:
+                    return getattr(exchange_user, 'PrimarySmtpAddress', None)
+            return getattr(recipient, 'Address', None)
+        return None
+    
+    def get_recipients_str(self, message, recipient_type) -> str:
+        recipients = getattr(message, 'Recipients', [])
+        if recipient_type is not None:
+            recipients = [r for r in recipients if hasattr(r, 'Type') and r.Type == recipient_type]
+        recipient_strs = []
+        for r in recipients:
+            name = getattr(r, 'Name', '') or ''
+            email = self.get_recipient_smtp(r) or ''
+            if name and email:
+                recipient_strs.append(f"{name} ({email})")
+            elif name:
+                recipient_strs.append(name)
+            elif email:
+                recipient_strs.append(email)
+        return "; ".join(recipient_strs)
+    
+    def get_organizer_smtp(self, message) -> str:
+        organizer = getattr(message, 'Organizer', None)
+        if not organizer:
+            return ''
+        # Buscar en Recipients el que coincida con el nombre del Organizer
+        for r in getattr(message, 'Recipients', []):
+            if getattr(r, 'Name', '') == organizer:
+                email = self.get_recipient_smtp(r)
+                if email:
+                    return f"{organizer} ({email})"
+                else:
+                    return organizer
+        # Si no se encuentra, devolver solo el nombre
+        return organizer

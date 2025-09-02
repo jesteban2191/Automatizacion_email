@@ -59,6 +59,12 @@ class QUERYDASL(str, Enum):
     SUBJECT_PREFIX = 'urn:schemas:httpmail:subjectprefix' # Prefijo del asunto (Re:, Fwd:, etc.)
     
 
+class OUTLOOKTYPERECIPENTS(int, Enum):
+    TO = 1
+    CC = 2
+    BCC = 3
+    
+
 class DataFiltersEmails(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
@@ -72,8 +78,8 @@ class DataFiltersEmails(BaseModel):
     bcc: Optional[list[str]] = None  # Lista de nombres en copia oculta
     has_attachments: Optional[bool] = None
     is_read: Optional[bool] = None
-    received_after: Optional[str] = None  # ISO format date string
-    received_before: Optional[str] = None  # ISO format date string
+    received_after: Optional[datetime] = None  # ISO format date string
+    received_before: Optional[datetime] = None  # ISO format date string
     conversation_topic: Optional[str] = None  # Corresponde al asunto del hilo de conversación (conversation topic)
     referenceid: Optional[list[str]] = None  # Corresponde al Message-ID de los emails referenciados (header References)
     msg_id: Optional[str] = None  # Corresponde al Message-ID del email (header)
@@ -115,7 +121,7 @@ class DataFiltersEmails(BaseModel):
 class DataGetEmails(BaseModel):
     standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
     custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
-    max_emails: Optional[int] = 100  # Número máximo de emails a obtener
+    max_emails: Optional[int] = 500  # Número máximo de emails a obtener
     filters: Optional[DataFiltersEmails] = None
     mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
     page_next: Optional[int] = None # Página siguiente a obtener, si es None, se obtiene la primera página
