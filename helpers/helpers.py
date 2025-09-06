@@ -2,6 +2,8 @@ import os
 from dotenv import load_dotenv
 from ..common import CredentialsInfoPath
 import re
+import pywintypes
+import datetime
 
 
 def crear_credenciales_entorno(cred_info: CredentialsInfoPath):
@@ -72,3 +74,9 @@ def remove_emojis(text):
         return text
     # Elimina caracteres fuera del plano multilingüe básico (BMP)
     return re.sub(r'[^\u0000-\uFFFF]', '', text)
+
+def format_datetime(dt):
+    import pywintypes
+    if isinstance(dt, datetime.datetime) or isinstance(dt, pywintypes.datetime):
+        return dt.strftime('%d/%m/%Y %H:%M:%S')
+    return ''

@@ -1,12 +1,13 @@
 from .email_interface import EmailInterface
 from ..common import ConnectionInfo, DataGetEmails, DataFiltersEmails, QUERYDASL, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX
 import win32com.client
+import pythoncom
 import re
 import datetime
 import pandas as pd
 from time import time
-from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis
-from ..common import OUTLOOKTYPERECIPENTS
+from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis, format_datetime
+from ..common import OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr
 import os
 
 class OutlookEmail(EmailInterface):
@@ -24,6 +25,7 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####          Obtengo todos los parámetros para descagar los emails            #########
         #########################################################################################
+        self.store_folder = datagetemails.store_folder
         self.standard_folders = datagetemails.standard_folder
         self.custom_folder = datagetemails.custom_folder
         if self.custom_folder:
@@ -35,6 +37,7 @@ class OutlookEmail(EmailInterface):
         self.tiempo_transformacion_datos = 0
         self.tiempo_transformacion_datos_acumulado = 0 if self.page_next is None else self.tiempo_transformacion_datos_acumulado
         self.tiempo_descarga_acumulado = 0 if self.page_next is None else self.tiempo_descarga_acumulado
+        
         
         
         #########################################################################################
@@ -52,12 +55,35 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####               Obtengo los emails según los parámetros                     #########
         #########################################################################################
+        # list_paths = self.get_path_folders()
+        # print(list_paths)
+        # base_path = f"{self.store_folder}\\{OutlookStandardFoldersstr[self.standard_folders.name].value}"
+        # full_path = (f"{base_path}\\" + "\\".join(self.custom_folder)) if self.custom_folder else base_path
+        # print(full_path)
+        # if full_path not in list_paths:
+        # #     raise ValueError(f"La ruta especificada '{full_path}' no existe en Outlook. Rutas disponibles: {list_paths}")
+
         folder = self._conn.GetDefaultFolder(self.standard_folders.value)
         if self.custom_folder:
             for subfolder in self.custom_folder:
                 folder = folder.Folders[subfolder]
         
+        # scope = folder.FolderPath.lstrip("\\")
+        # print(f"scope: {scope} | type: {type(scope)}")
+        # print(f"folder.Name: {folder.Name} | type: {type(folder.Name)}")
+        # print(f"self.query: {self.query} | type: {type(self.query)}")
+        
         if self.query:
+            # print(type(self._outlook))
+            # filtered_messages = self._outlook.AdvancedSearch(
+            #     scope,  # Usa la ruta limpia
+            #     self.query,  # Query DASL generado
+            #     False,
+            #     None
+            # )
+            # while not filtered_messages.search_done:
+            #     pythoncom.PumpWaitingMessages()
+            #     print(f"Esperando a que la búsqueda se complete...{filtered_messages.progress_count} eventos de progreso recibidos.")
             filtered_messages = folder.Items.Restrict(self.query)
         else:
             filtered_messages = folder.Items
@@ -98,14 +124,14 @@ class OutlookEmail(EmailInterface):
                     'To': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.TO.value)}",
                     'CC': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.CC.value)}",
                     'BCC': f"{self.get_recipients_str(message, OUTLOOKTYPERECIPENTS.BCC.value)}",
-                    'ReceivedTime': getattr(message, 'ReceivedTime', None),
-                    'SentOn': getattr(message, 'SentOn', None),
+                    'ReceivedTime': format_datetime(getattr(message, 'ReceivedTime', None)),
+                    'SentOn': format_datetime(getattr(message, 'SentOn', None)),
                     'Body': remove_emojis(getattr(message, 'Body', None)),
                     'HTMLBody': remove_emojis(getattr(message, 'HTMLBody', None)),
                     'Num_of_Attachments': getattr(getattr(message, 'Attachments', None), 'Count', 0),
                     'IsRead': getattr(message, 'UnRead', None) == 0,
                     'Importance': "LOW" if getattr(message, 'Importance', None) == 0 else "NORMAL" if getattr(message, 'Importance', None) == 1 else "HIGH" if getattr(message, 'Importance', None) == 2 else "Unknown",
-                    'ConversationTopic': getattr(message, 'ConversationTopic', None),
+                    'ConversationTopic': remove_emojis(getattr(message, 'ConversationTopic', None)),
                     'ConversationID': getattr(message, 'ConversationID', None),
                     'MessageID': getattr(message, 'EntryID', None),
                     'MessageClass': message_class,
@@ -117,9 +143,9 @@ class OutlookEmail(EmailInterface):
                 email_data = {
                     'Tipo': 'Cita/Reunión',
                     'Subject': getattr(message, 'Subject', None),
-                    'Organizer': f"{self.get_organizer_smtp(message)}",
-                    'Start': getattr(message, 'Start', None),
-                    'End': getattr(message, 'End', None),
+                    'Organizer': f"{self.get_meeting_organizer(message)}",
+                    'Start': self.get_meeting_start(message),
+                    'End': self.get_meeting_end(message),
                     'Body': getattr(message, 'Body', None),
                     'HTMLBody': getattr(message, 'HTMLBody', None),
                     'Recipients': f"{self.get_recipients_str(message, None)}",  # O ajusta para todos los tipos si lo deseas
@@ -194,50 +220,68 @@ class OutlookEmail(EmailInterface):
         
         if self.subject:
             if "%" in self.subject:
-                query_parts.append(f"(LOWER({QUERYDASL.SUBJECT.value}) LIKE '{self.subject}')")
+                query_parts.append(f"""(({QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.lower()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.upper()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.title()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.capitalize()}'))""")
             else:
-                query_parts.append(f"(LOWER({QUERYDASL.SUBJECT.value}) = '{self.subject}')")
+                query_parts.append(f"""(({QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.lower()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.upper()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.title()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.capitalize()}'))""")
 
         if self.sender_email:
-            senders = [f"LOWER({QUERYDASL.SENDER_EMAIL.value}) = '{email.lower()}'" for email in self.sender_email]
-            query_parts.append("(" + f" {self.logic_operator_between_senders.value} ".join(senders) + ")")
+            senders = [f"""{QUERYDASL.SENDER_EMAIL_IPM_NOTE.value} = '{email.lower()}'""" for email in self.sender_email]
+            query_parts.append(f"(" + f" {self.logic_operator_between_senders.value} ".join(senders) + ")")
 
         if self.recipient_email:
-            recipients = [f"LOWER({QUERYDASL.RECIPIENT_EMAIL.value}) = '{email.lower()}'" for email in self.recipient_email]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(recipients) + ")")
+            recipients = [f"{QUERYDASL.RECIPIENT_EMAIL.value} = '{email.lower()}'" for email in self.recipient_email]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(recipients) + ")")
             
         if self.sender:
-            senders = [f"LOWER({QUERYDASL.SENDER_NAME.value}) LIKE '%{name.lower()}%'" for name in self.sender]
-            query_parts.append("(" + f" {self.logic_operator_between_senders.value} ".join(senders) + ")")
+            senders = [f"""({QUERYDASL.SENDER_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name.upper()}%')""" for name in self.sender]
+            query_parts.append(f"(" + f" {self.logic_operator_between_senders.value} ".join(senders) + ")")
         
         if self.recipient:
-            recipients = [f"LOWER({QUERYDASL.RECIPIENT_NAME.value}) LIKE '%{name.lower()}%'" for name in self.recipient]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(recipients) + ")")
-            
+            recipients = [f"""({QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.upper()}%')""" for name in self.recipient]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(recipients) + ")")
+
         if self.cc_email:
-            cc_recipients = [f"LOWER({QUERYDASL.CC_EMAIL.value}) = '{email.lower()}'" for email in self.cc_email]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(cc_recipients) + ")")
+            cc_recipients = [f"{QUERYDASL.CC_EMAIL.value} = '{email.lower()}'" for email in self.cc_email]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(cc_recipients) + ")")
 
         if self.bcc_email:
-            bcc_recipients = [f"LOWER({QUERYDASL.BCC_EMAIL.value}) = '{email.lower()}'" for email in self.bcc_email]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(bcc_recipients) + ")")
-            
+            bcc_recipients = [f"{QUERYDASL.BCC_EMAIL.value} = '{email.lower()}'" for email in self.bcc_email]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(bcc_recipients) + ")")
+
         if self.cc:
-            cc_names = [f"LOWER({QUERYDASL.CC_NAME.value}) LIKE '%{name.lower()}%'" for name in self.cc]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(cc_names) + ")")
-        
+            cc_names = [f"""({QUERYDASL.CC_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.CC_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.CC_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.CC_NAME.value} LIKE '%{name.upper()}%')""" for name in self.cc]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(cc_names) + ")")
+
         if self.bcc:
-            bcc_names = [f"LOWER({QUERYDASL.BCC_NAME.value}) LIKE '%{name.lower()}%'" for name in self.bcc]
-            query_parts.append("(" + f" {self.logic_operator_between_recipients.value} ".join(bcc_names) + ")")
-            
+            bcc_names = [f"""({QUERYDASL.BCC_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.BCC_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.BCC_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.BCC_NAME.value} LIKE '%{name.upper()}%')""" for name in self.bcc]
+            query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(bcc_names) + ")")
+
         if self.body:
             if "%" in self.body:
                 body_value = self.body.lower()
-                query_parts.append(f"(LOWER({QUERYDASL.BODY_TEXT.value}) LIKE '{body_value}' OR LOWER({QUERYDASL.BODY_HTML.value}) LIKE '{body_value}')")
+                query_parts.append(f"""({QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.upper()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.title()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}')""")
             else:
                 body_value = f"%{self.body.lower()}%"
-                query_parts.append(f"(LOWER({QUERYDASL.BODY_TEXT.value}) = '{body_value}' OR LOWER({QUERYDASL.BODY_HTML.value}) = '{body_value}')")
-                
+                query_parts.append(f"""({QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.upper()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.title()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}')""")
+
         if self.has_attachments is not None:
             has_attachments_value = 1 if self.has_attachments else 0
             query_parts.append(f"({QUERYDASL.HAS_ATTACHMENTS.value} = {has_attachments_value})")
@@ -245,21 +289,21 @@ class OutlookEmail(EmailInterface):
         if self.is_read is not None:
             is_read_value = 1 if self.is_read else 0
             query_parts.append(f"({QUERYDASL.IS_READ.value} = {is_read_value})")
-            
+
         if self.received_after and self.received_before:
             if self.received_after > self.received_before:
                 raise ValueError("received_after no puede ser mayor que received_before")
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}' "
-                f"AND {QUERYDASL.RECEIVED_TIME.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}' "
+                f"AND {QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
             )
         elif self.received_after:
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}')"
             )
         elif self.received_before:
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
             )
         else:
             date_filter = None
@@ -269,23 +313,23 @@ class OutlookEmail(EmailInterface):
             
         if self.conversation_topic:
             if "%" in self.conversation_topic:
-                query_parts.append(f"(LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) LIKE '{self.conversation_topic.lower()}')")
+                query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) LIKE '{self.conversation_topic.lower()}')")
             else:
-                query_parts.append(f"(LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) = '{self.conversation_topic.lower()}')")
+                query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) = '{self.conversation_topic.lower()}')")
         
         if self.referenceid:
             references = [f"{QUERYDASL.REFERENCE_ID.value} = '{ref}'" for ref in self.referenceid]
-            query_parts.append("(" + " OR ".join(references) + ")")
+            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND (" + " OR ".join(references) + "))")
             
         if self.msg_id:
-            msgids = [f"{QUERYDASL.MESSAGE_ID.value} = '{self.msg_id}'"]
-            query_parts.append("(" + " OR ".join(msgids) + ")")
-            
+            msgids = [f"{QUERYDASL.ID_IPM_NOTE.value} = '{ref}'" for ref in self.msg_id]
+            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND (" + " OR ".join(msgids) + "))")
+
         if self.importance_email:
-            query_parts.append(f"({QUERYDASL.IMPORTANCE.value} = {self.importance_email.value})")
+            query_parts.append(f"((LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND {QUERYDASL.IMPORTANCE_IPM_NOTE.value} = {self.importance_email.value})")
             
         if self.subject_prefix:
-            query_parts.append(f"(LOWER({QUERYDASL.SUBJECT_PREFIX.value}) = '{self.subject_prefix.value.lower()}')")
+            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value}) = '{self.subject_prefix.value.lower()}')")
             
         if not query_parts:
             query = None
@@ -361,3 +405,68 @@ class OutlookEmail(EmailInterface):
                     return organizer
         # Si no se encuentra, devolver solo el nombre
         return organizer
+    
+    def get_meeting_organizer(self, message) -> str:
+        organizer = getattr(message, 'Organizer', None)
+        if organizer:
+            return organizer
+        sender = self.get_sender_str(message)
+        if sender:
+            return sender
+        # Opcional: buscar en Recipients si coincide el nombre
+        return ''
+    
+    def get_meeting_start(self, message):
+        for attr in ['Start', 'StartUTC', 'MeetingStartTime', 'OriginalStart', 'AppointmentStart']:
+            value = getattr(message, attr, None)
+            if value:
+                return value
+        if getattr(message, 'MessageClass', None) == 'IPM.Schedule.Meeting.Request':
+            appointment = getattr(message, 'GetAssociatedAppointment', lambda x=None: None)(False)
+            if appointment:
+                start = getattr(appointment, 'Start', None)
+                if start:
+                    return format_datetime(start)
+        return None
+    
+    def get_meeting_end(self, message):
+        for attr in ['End', 'EndUTC', 'MeetingEndTime', 'OriginalEnd', 'AppointmentEnd']:
+            value = getattr(message, attr, None)
+            if value:
+                return value
+        # Si no hay End pero sí Start y Duration
+        start = self.get_meeting_start(message)
+        duration = getattr(message, 'Duration', None)
+        if start and duration:
+            try:
+                # Duration está en minutos
+                return start + datetime.timedelta(minutes=duration)
+            except Exception:
+                pass
+        
+        if getattr(message, 'MessageClass', None) == 'IPM.Schedule.Meeting.Request':
+            appointment = getattr(message, 'GetAssociatedAppointment', lambda x=None: None)(False)
+            if appointment:
+                End = getattr(appointment, 'End', None)
+                if End:
+                    return format_datetime(End)
+
+        return None
+    
+    
+    
+    
+    
+    def get_path_folders(self) -> list:
+        list_paths = []
+        for i in range(1, self._conn.Folders.Count + 1):
+            store = self._conn.Folders[i]
+            if self.store_folder == store.Name:
+                
+                for j in range(1, store.Folders.Count + 1):
+                    folder = store.Folders[j]
+                    path = f"{store.Name}\\{folder.Name}"
+                    list_paths.append(path)
+                    #print(f"  Carpeta: {folder.Name} - Path: {path}")
+            
+        return list_paths

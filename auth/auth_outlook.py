@@ -28,3 +28,5 @@ class AuthOutlook(AuthInterface):
     @property
     def get_namespace(self):
         return self._namespace
+    
+    

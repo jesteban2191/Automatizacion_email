@@ -18,6 +18,19 @@ class OutlookStandarFolders(int, Enum):
     JOURNAL = 13  # Journal
     ROOT = 0  # Root
     
+class OutlookStandardFoldersstr(str, Enum):
+    INBOX = 'Bandeja de entrada'  # Inbox
+    OUTBOX = 'Bandeja de salida'  # Outbox
+    SENT_ITEMS = 'Elementos enviados'  # Sent Items
+    DELETED_ITEMS = 'Elementos eliminados'  # Deleted Items
+    DRAFTS = 'Borradores'  # Drafts
+    JUNK_EMAIL = 'Correo no deseado'  # Junk Email
+    CALENDAR = 'Calendario'  # Calendar
+    CONTACTS = 'Contactos'  # Contacts
+    TASKS = 'Tareas'  # Tasks
+    JOURNAL = 'Diario'  # Journal
+    ROOT = 'Raíz'  # Root
+ 
 class IMPORTANCEEMAIL(int, Enum):
     LOW = 0
     NORMAL = 1
@@ -36,28 +49,121 @@ class SUBJECTPREFIX(str, Enum):
     ENC = 'Enc:'
 
 class QUERYDASL(str, Enum):
-    SUBJECT = 'urn:schemas:mailheader:subject' # Asunto del correo
-    BODY_TEXT = 'urn:schemas:httpmail:textdescription' #Cuerpo del correo en texto plano
-    BODY_HTML = 'urn:schemas:httpmail:htmldescription' #Cuerpo del correo en HTML
-    SENDER_EMAIL = 'urn:schemas:httpmail:fromemail' # Email del remitente
-    RECIPIENT_EMAIL = 'urn:schemas:httpmail:to' # Email del destinatario
-    CC_EMAIL = 'urn:schemas:httpmail:cc' # Email destinatarios en copia
-    BCC_EMAIL = 'urn:schemas:httpmail:bcc' # Email destinatarios en copia oculta
-    SENDER_NAME = 'urn:schemas:httpmail:fromname' # Nombre del remitente
-    RECIPIENT_NAME = 'urn:schemas:httpmail:toname' # Nombre del destinatario
-    CC_NAME = 'urn:schemas:httpmail:ccname' # Nombre destinatarios en copia
-    BCC_NAME = 'urn:schemas:httpmail:bccname' # Nombre destinatarios en copia oculta
-    IMPORTANCE = 'urn:schemas:httpmail:importance' # Importancia del correo (1=Alta, 2=Normal, 3=Baja)
-    HAS_ATTACHMENTS = 'urn:schemas:httpmail:hasattachment' # Si el correo tiene adjuntos
-    IS_READ = 'urn:schemas:httpmail:read' # Si el correo ha sido leído
-    RECEIVED_TIME = 'urn:schemas:httpmail:datereceived' # Fecha y hora de recepción
-    SENT_ON = 'urn:schemas:httpmail:date' # Fecha y hora de envío
-    DELIVERED_TIME = 'urn:schemas:httpmail:deliverytime' # Fecha y hora de entrega
-    CONVERSATION_TOPIC = 'urn:schemas:httpmail:thread-topic' # Asunto del hilo de conversación
-    REFERENCEID = 'urn:schemas:httpmail:references' # Message-ID de los emails referenciados (header References)
-    MESSAGE_ID = 'urn:schemas:httpmail:messageid' # Message-ID del email (header)
-    SUBJECT_PREFIX = 'urn:schemas:httpmail:subjectprefix' # Prefijo del asunto (Re:, Fwd:, etc.)
     
+    #######################################################################
+    #####             Campos DASL para mensajes IPM.Note              #####
+    #######################################################################
+    SUBJECT_IPM_NOTE = 'urn:schemas:httpmail:subject' # Asunto del correo
+    BODY_TEXT_IPM_NOTE = 'urn:schemas:httpmail:textdescription' #Cuerpo del correo en texto plano
+    BODY_HTML_IPM_NOTE = 'urn:schemas:httpmail:htmlbody' #Cuerpo del correo en HTML
+    SENDER_EMAIL_IPM_NOTE = 'urn:schemas:httpmail:fromemail' # Email del remitente
+    RECIPIENT_EMAIL_IPM_NOTE = 'urn:schemas:httpmail:to' # Email del destinatario
+    CC_EMAIL_IPM_NOTE = 'urn:schemas:httpmail:cc' # Email destinatarios en copia
+    BCC_EMAIL_IPM_NOTE = 'urn:schemas:httpmail:bcc' # Email destinatarios en copia oculta
+    SENDER_NAME_IPM_NOTE = 'urn:schemas:httpmail:fromname' # Nombre del remitente
+    RECIPIENT_NAME_IPM_NOTE = 'urn:schemas:httpmail:toname' # Nombre del destinatario
+    CC_NAME_IPM_NOTE = 'urn:schemas:httpmail:ccname' # Nombre destinatarios en copia
+    BCC_NAME_IPM_NOTE = 'urn:schemas:httpmail:bccname' # Nombre destinatarios en copia oculta
+    IMPORTANCE_IPM_NOTE = 'urn:schemas:httpmail:importance' # Importancia del correo (1=Alta, 2=Normal, 3=Baja)
+    HAS_ATTACHMENTS_IPM_NOTE = 'urn:schemas:httpmail:hasattachment' # Si el correo tiene adjuntos
+    IS_READ_IPM_NOTE = 'urn:schemas:httpmail:read' # Si el correo ha sido leído
+    RECEIVED_TIME_IPM_NOTE = 'urn:schemas:httpmail:datereceived' # Fecha y hora de recepción
+    SENT_ON_IPM_NOTE = 'urn:schemas:httpmail:date' # Fecha y hora de envío
+    DELIVERED_TIME_IPM_NOTE = 'urn:schemas:httpmail:deliverytime' # Fecha y hora de entrega
+    CONVERSATION_TOPIC_IPM_NOTE = 'urn:schemas:httpmail:thread-topic' # Asunto del hilo de conversación
+    REFERENCEID_IPM_NOTE = 'urn:schemas:httpmail:references' # Message-ID de los emails referenciados (header References)
+    ID_IPM_NOTE = 'urn:schemas:httpmail:messageid' # Message-ID del email (header)
+    SUBJECT_PREFIX_IPM_NOTE = 'urn:schemas:httpmail:subjectprefix' # Prefijo del asunto (Re:, Fwd:, etc.)
+    MSGCLASS_IPM_NOTE = 'urn:schemas:httpmail:messageclass' # Clase del mensaje (IPM.Note, IPM.Appointment, etc.)
+    
+    ############################################################################
+    ##### Campos DASL para mensajes IPM.Appointment o IPM.Schedule_Meeting #####
+    ############################################################################
+    SUBJECT_IPM_MEETING = 'urn:schemas:calendar:subject' # Asunto de la cita o reunión
+    BODY_TEXT_IPM_MEETING = 'urn:schemas:calendar:body' # Cuerpo de la cita o reunión en texto plano
+    LOCATION_IPM_MEETING = 'urn:schemas:calendar:location' # Ubicación de la cita o reunión
+    START_TIME_IPM_MEETING = 'urn:schemas:calendar:starttime' # Fecha
+    END_TIME_IPM_MEETING = 'urn:schemas:calendar:endtime' # Fecha de fin
+    ORGANIZER_IPM_MEETING = 'urn:schemas:calendar:organizer' # Organizador de la cita o reunión
+    DURATION_IPM_MEETING = 'urn:schemas:calendar:duration' # Duración en minutos
+    REQUIRED_ATTENDEES_IPM_MEETING = 'urn:schemas:calendar:requiredattendees' # Asistentes obligatorios
+    OPTIONAL_ATTENDEES_IPM_MEETING = 'urn:schemas:calendar:optionalattendees' # Asistentes opcionales
+    RESOURCES_IPM_MEETING = 'urn:schemas:calendar:resources' # Recursos
+    IMPORTANCE_IPM_MEETING = 'urn:schemas:calendar:importance' # Importancia de la cita o reunión (1=Alta, 2=Normal, 3=Baja)
+    MEETING_STATUS_IPM_MEETING = 'urn:schemas:calendar:meetingstatus' # Estado de la reunión (0=No es reunión, 1=Reunión, 3=Reunión cancelada)
+    CATEGORY_IPM_MEETING = 'urn:schemas:calendar:category' # Categoría de la cita o reunión
+    BUSYSTATUS_IPM_MEETING = 'urn:schemas:calendar:busystatus' # Estado de disponibilidad (0=Libre, 1=Con reserva, 2=Ocupado, 3=Fuera de la oficina)
+    ID_IPM_MEETING = 'urn:schemas:calendar:uid' # Identificador único del evento (UID)
+    
+    ############################################################################
+    #####   Campos DASL para mensajes IPM.Task o IPM.ScheduleTask          #####
+    ############################################################################
+    SUBJECT_IPM_TASK = 'urn:schemas:task:subject' # Asunto de la tarea
+    BODY_TEXT_IPM_TASK = 'urn:schemas:task:body' # Cuerpo de la tarea en texto plano
+    OWNER_IPM_TASK = 'urn:schemas:task:owner' # Propietario de la tarea
+    START_DATE_IPM_TASK = 'urn:schemas:task:startdate' # Fecha de inicio
+    DUE_DATE_IPM_TASK = 'urn:schemas:task:duedate' # Fecha de vencimiento
+    STATUS_IPM_TASK = 'urn:schemas:task:status' # Estado de la tarea (0=No iniciada, 1=En progreso, 2=Completada, 3=En espera, 4=Cancelada)
+    PERCENT_COMPLETE_IPM_TASK = 'urn:schemas:task:percentcomplete' # Porcentaje de completitud (0-100)
+    ACTUAL_WORK_IPM_TASK = 'urn:schemas:task:actualwork' # Trabajo real en minutos
+    TOTAL_WORK_IPM_TASK = 'urn:schemas:task:totalwork' # Trabajo total en minutos
+    ID_IPM_TASK = 'urn:schemas:task:uid' # Identificador único de la tarea
+    
+    ############################################################################
+    #####   Campos DASL para mensajes IPM.Contact                          #####
+    ############################################################################
+    NAME_IPM_CONTACT = 'urn:schemas:contacts:fullname' # Nombre del contacto
+    EMAIL_IPM_CONTACT = 'urn:schemas:contacts:email' # Email del contacto
+    EMAIL2_IPM_CONTACT = 'urn:schemas:contacts:email2' # Segundo email del contacto
+    EMAIL3_IPM_CONTACT = 'urn:schemas:contacts:email3' # Tercer email del contacto
+    BUSINESS_PHONE_IPM_CONTACT = 'urn:schemas:contacts:businessphone' # Teléfono del trabajo del contacto
+    MOBILEPHONE_IPM_CONTACT = 'urn:schemas:contacts:mobilephone' # Teléfono móvil del contacto
+    HOME_PHONE_IPM_CONTACT = 'urn:schemas:contacts:homephone' # Teléfono de casa del contacto
+    JOB_TITLE_IPM_CONTACT = 'urn:schemas:contacts:jobtitle' # Cargo del contacto
+    ADDRESS_IPM_CONTACT = 'urn:schemas:contacts:address' # Dirección del contacto
+    BIRTHDAY_IPM_CONTACT = 'urn:schemas:contacts:birthday' # Cumpleaños del contacto
+    NOTES_IPM_CONTACT = 'urn:schemas:contacts:notes' # Notas del contacto
+    BODY_IPM_CONTACT = 'urn:schemas:contacts:body' # Cuerpo en texto plano
+    CATEGORY_IPM_CONTACT = 'urn:schemas:contacts:categories' # Categoría del contacto
+    ID_IPM_CONTACT = 'urn:schemas:contacts:uid' # Identificador único del contacto
+    
+    ############################################################################
+    #####   Campos DASL para mensajes IPM.StickyNote                       #####
+    ############################################################################
+    SUBJECT_IPM_STICKYNOTE = 'urn:schemas:note:subject' # Asunto de la nota
+    BODY_TEXT_IPM_STICKYNOTE = 'urn:schemas:note:body' # Cuerpo de la nota en texto plano
+    COLOR_IPM_STICKYNOTE = 'urn:schemas:note:color' #Color de la nota (0=Amarillo, 1=Azul, 2=Verde, 3=Rosa, 4=Naranja, 5=Morado, 6=Rojo)
+    CATEGORY_IPM_STICKYNOTE = 'urn:schemas:note:categories' # Categoría de la nota
+    CREATED_TIME_IPM_STICKYNOTE = 'urn:schemas:note:created'
+    ID_IPM_STICKYNOTE = 'urn:schemas:note:uid' # Identificador único de la nota
+    
+    ############################################################################
+    #####   Campos DASL para mensajes IPM.Post                             #####
+    ############################################################################
+    SUBJECT_IPM_POST = 'urn:schemas:post:subject' # Asunto del post
+    BODY_TEXT_IPM_POST = 'urn:schemas:post:body' # Cuerpo del post en texto plano
+    SENDER_EMAIL_IPM_POST = 'urn:schemas:post:fromemail' # Email del remitente
+    SENDER_NAME_IPM_POST = 'urn:schemas:post:fromname' # Nombre del remitente
+    IMPORTANCE_IPM_POST = 'urn:schemas:post:importance' # Importancia del post (1=Alta, 2=Normal, 3=Baja)
+    HAS_ATTACHMENTS_IPM_POST = 'urn:schemas:post:hasattachment' # Si el post tiene adjuntos
+    IS_READ_IPM_POST = 'urn:schemas:post:read' # Si el post ha sido leído
+    CATEGORY_IPM_POST = 'urn:schemas:post:categories' # Categoría del post
+    CREATED_TIME_IPM_POST = 'urn:schemas:post:created' # Fecha y hora de creación
+    MODIFIED_TIME_IPM_POST = 'urn:schemas:post:modified' # Fecha y hora de modificación
+    ID_IPM_POST = 'urn:schemas:post:messageid' # Identificador único del post
+    
+    ############################################################################
+    #####   Campos DASL para mensajes IPM.Post                             #####
+    ############################################################################
+    SUBJECT_IPM_JOURNAL = 'urn:schemas:journal:subject' # Asunto de la entrada del diario
+    BODY_TEXT_IPM_JOURNAL = 'urn:schemas:journal:body' # Cuerpo de la entrada del diario en texto plano
+    FILENAME_IPM_JOURNAL = 'urn:schemas:journal:filename' # Nombre del archivo asociado
+    TYPE_IPM_JOURNAL = 'urn:schemas:journal:type' # Tipo de entrada
+    CATEGORY_IPM_JOURNAL = 'urn:schemas:journal:categories' # Categoría de la entrada
+    CREATED_TIME_IPM_JOURNAL = 'urn:schemas:journal:created' # Fecha y hora de creación
+    ID_IPM_JOURNAL = 'urn:schemas:journal:uid' # Identificador único de la entrada del diario
+    
+
 
 class OUTLOOKTYPERECIPENTS(int, Enum):
     TO = 1
@@ -82,7 +188,7 @@ class DataFiltersEmails(BaseModel):
     received_before: Optional[datetime] = None  # ISO format date string
     conversation_topic: Optional[str] = None  # Corresponde al asunto del hilo de conversación (conversation topic)
     referenceid: Optional[list[str]] = None  # Corresponde al Message-ID de los emails referenciados (header References)
-    msg_id: Optional[str] = None  # Corresponde al Message-ID del email (header)
+    msg_id: Optional[list[str]] = None  # Corresponde al Message-ID del email (header)
     importance_email: Optional[IMPORTANCEEMAIL] = None  # IMPORTANCEEMAIL Enum
     logic_operator: Optional[LOGICOPERATOR] = LOGICOPERATOR.AND  # 'AND' o 'OR'
     logic_operator_between_senders: Optional[LOGICOPERATOR] = LOGICOPERATOR.OR  # 'AND' o 'OR' entre los remitentes
@@ -119,6 +225,7 @@ class DataFiltersEmails(BaseModel):
     
 
 class DataGetEmails(BaseModel):
+    store_folder: str
     standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
     custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
     max_emails: Optional[int] = 500  # Número máximo de emails a obtener
