@@ -274,3 +274,14 @@ class DataDownloadAttachments(BaseModel):
         
         filenames = [s.replace('.', '') if s.startswith('.') else s.split('.')[0] for s in v]
         return filenames
+
+    @field_validator('download_folder', mode='before')
+    def validate_download_folder(cls, v):
+        if v is None:
+            return v
+        # Aquí puedes agregar validaciones específicas para la carpeta de descarga
+        v = v.replace('\\', '/')
+        folder_regex = r'^[\w/]+$'
+        if not re.match(folder_regex, v):
+            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
+        return v
