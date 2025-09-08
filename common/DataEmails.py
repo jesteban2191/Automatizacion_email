@@ -245,4 +245,32 @@ class DataGetEmails(BaseModel):
         return v
     
 
-
+class DataDownloadAttachments(BaseModel):
+    email_ids: list[str]
+    download_folder: str
+    mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
+    overwrite: Optional[bool] = True  # Sobrescribir archivos si ya existen
+    only_filenames: Optional[list[str]] = None  # Si se especifica, solo se descargan los archivos con estos nombres
+    only_extensions: Optional[list[str]] = None  # Si se especifica, solo se descargan los archivos con estas extensiones (sin el punto)
+    ignore_extensions: Optional[list[str]] = None  # Si se especifica, no se descargan los archivos con estas extensiones (sin el punto)
+    ignore_filenames: Optional[list[str]] = None  # Si se especifica, no se descargan los archivos con estos nombres
+    create_subfolder_per_email: Optional[bool] = True  # Crear una subcarpeta por cada email, nombrada con el nombre y fecha de cada correo
+    
+    @field_validator('only_extensions', 'ignore_extensions', mode='before')
+    def validate_extensions(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("Las extensiones deben ser una lista.")
+        lista_sin_extension = [s.split('.')[-1] if not s.startswith('.') else s[1:] for s in v]
+        return lista_sin_extension
+    
+    @field_validator('only_filenames', 'ignore_filenames', mode='before')
+    def validate_filenames(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("Los nombres de archivo deben ser una lista.")
+        
+        filenames = [s.replace('.', '') if s.startswith('.') else s.split('.')[0] for s in v]
+        return filenames
