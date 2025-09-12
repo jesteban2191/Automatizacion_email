@@ -1,14 +1,16 @@
 from .email_interface import EmailInterface
-from ..common import ConnectionInfo, DataGetEmails, DataFiltersEmails, QUERYDASL, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX
+from ..common import ConnectionInfo, DataGetEmails, DataFiltersEmails, QUERYDASL, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments
 import win32com.client
 import pythoncom
 import re
-import datetime
 import pandas as pd
 from time import time
-from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis, format_datetime
-from ..common import OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr
+from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis, format_datetime, format_date_folder
+from ..common import OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr, OutlookStandarFolders, DateTypes
 import os
+from pathlib import Path
+from typing import Optional
+from datetime import datetime
 
 class OutlookEmail(EmailInterface):
 
@@ -16,6 +18,9 @@ class OutlookEmail(EmailInterface):
         self._conn = conn # Este es el objeto Namespace autenticado
         self.tiempo_transformacion_datos_acumulado = 0
         self.tiempo_descarga_acumulado = 0
+        self.authenticated_email = self.get_main_mailbox_name()
+        print(self.authenticated_email)
+        pass
         
     
     def get_emails(self, datagetemails: DataGetEmails):
@@ -25,11 +30,9 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####          Obtengo todos los parámetros para descagar los emails            #########
         #########################################################################################
-        self.store_folder = datagetemails.store_folder
+        self.store_folder = datagetemails.store_folder if datagetemails.store_folder else self.authenticated_email
         self.standard_folders = datagetemails.standard_folder
         self.custom_folder = datagetemails.custom_folder
-        if self.custom_folder:
-            self.custom_folder = self.custom_folder.split('/')
         self.max_emails = datagetemails.max_emails
         self.mark_as_read = datagetemails.mark_as_read
         self.page_next = datagetemails.page_next
@@ -55,35 +58,12 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####               Obtengo los emails según los parámetros                     #########
         #########################################################################################
-        # list_paths = self.get_path_folders()
-        # print(list_paths)
-        # base_path = f"{self.store_folder}\\{OutlookStandardFoldersstr[self.standard_folders.name].value}"
-        # full_path = (f"{base_path}\\" + "\\".join(self.custom_folder)) if self.custom_folder else base_path
-        # print(full_path)
-        # if full_path not in list_paths:
-        # #     raise ValueError(f"La ruta especificada '{full_path}' no existe en Outlook. Rutas disponibles: {list_paths}")
 
-        folder = self._conn.GetDefaultFolder(self.standard_folders.value)
-        if self.custom_folder:
-            for subfolder in self.custom_folder:
-                folder = folder.Folders[subfolder]
+        folder = self.validate_folder(self, self.standard_folders, self.custom_folder)
         
-        # scope = folder.FolderPath.lstrip("\\")
-        # print(f"scope: {scope} | type: {type(scope)}")
-        # print(f"folder.Name: {folder.Name} | type: {type(folder.Name)}")
-        # print(f"self.query: {self.query} | type: {type(self.query)}")
         
         if self.query:
-            # print(type(self._outlook))
-            # filtered_messages = self._outlook.AdvancedSearch(
-            #     scope,  # Usa la ruta limpia
-            #     self.query,  # Query DASL generado
-            #     False,
-            #     None
-            # )
-            # while not filtered_messages.search_done:
-            #     pythoncom.PumpWaitingMessages()
-            #     print(f"Esperando a que la búsqueda se complete...{filtered_messages.progress_count} eventos de progreso recibidos.")
+            
             filtered_messages = folder.Items.Restrict(self.query)
         else:
             filtered_messages = folder.Items
@@ -189,8 +169,54 @@ class OutlookEmail(EmailInterface):
     
     
     
+    def get_main_mailbox_name(self):
+        # Obtiene el correo SMTP del usuario autenticado
+        try:
+            smtp_address = self._conn.CurrentUser.AddressEntry.GetExchangeUser().PrimarySmtpAddress
+        except Exception:
+            smtp_address = self._conn.CurrentUser.Address
+        # Busca el store cuyo nombre coincide con el correo SMTP
+        for i in range(1, self._conn.Folders.Count + 1):
+            store = self._conn.Folders[i]
+            if store.Name == smtp_address:
+                return store.Name
+        # Si no lo encuentra, retorna el primero que no sea Favoritos/Public Folders/Archivar en línea
+        for i in range(1, self._conn.Folders.Count + 1):
+            store = self._conn.Folders[i]
+            if store.Name not in ["Favoritos", "Public Folders", "Archivar en línea"]:
+                return store.Name
+        return None
     
-
+    #################################################################################################################################
+    #####                               Función para validar el folder solicitado                                           #########
+    #################################################################################################################################
+    def validate_folder(self, standard_folder: OutlookStandarFolders, custom_folder: Optional[str] = None) -> win32com.client.CDispatch:
+        
+        base_path = f"{self.store_folder}\\{OutlookStandardFoldersstr[standard_folder.name].value}"
+        custom_folder_outlook_path = custom_folder.replace("/", "\\") if custom_folder else None
+        full_folder = f"{base_path}\\{custom_folder_outlook_path}" if custom_folder else f"{base_path}"
+        list_path_folders = self.get_path_folders()
+        if full_folder not in list_path_folders:
+            raise ValueError(f"La ruta especificada '{full_folder}' no existe en Outlook. Rutas disponibles: {list_path_folders}")
+                
+        if custom_folder:
+            custom_folder = custom_folder.split('/')
+        
+        folder = self._conn.GetDefaultFolder(standard_folder.value)
+        if custom_folder:
+            for subfolder in custom_folder:
+                try:
+                    folder = folder.Folders[subfolder]
+                except Exception:
+                    raise ValueError(f"La subcarpeta '{subfolder}' no existe en '{folder.Name}'.")
+                
+        return folder
+        
+    
+    
+    #################################################################################################################################
+    #####                               Función para creación de consulta SQL DASL                                          #########
+    #################################################################################################################################
     def create_query (self, datafilters: DataFiltersEmails) -> str:
         query_header = "@SQL= ("
         self.subject = datafilters.subject
@@ -220,9 +246,17 @@ class OutlookEmail(EmailInterface):
         
         if self.subject:
             if "%" in self.subject:
-                query_parts.append(f"""(({QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.lower()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.upper()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.title()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.capitalize()}'))""")
+                query_parts.append(f"""({QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.lower()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.upper()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.title()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject.capitalize()}'
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} LIKE '{self.subject}')""")
             else:
-                query_parts.append(f"""(({QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.lower()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.upper()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.title()}' {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.capitalize()}'))""")
+                query_parts.append(f"""({QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.lower()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.upper()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.title()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject.capitalize()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_IPM_NOTE.value} = '{self.subject}')""")
 
         if self.sender_email:
             senders = [f"""{QUERYDASL.SENDER_EMAIL_IPM_NOTE.value} = '{email.lower()}'""" for email in self.sender_email]
@@ -236,14 +270,16 @@ class OutlookEmail(EmailInterface):
             senders = [f"""({QUERYDASL.SENDER_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.SENDER_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.SENDER_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
-                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name.upper()}%')""" for name in self.sender]
+                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name.upper()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.SENDER_NAME.value} LIKE '%{name}%')""" for name in self.sender]
             query_parts.append(f"(" + f" {self.logic_operator_between_senders.value} ".join(senders) + ")")
         
         if self.recipient:
             recipients = [f"""({QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
-                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.upper()}%')""" for name in self.recipient]
+                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name.upper()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.RECIPIENT_NAME.value} LIKE '%{name}%')""" for name in self.recipient]
             query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(recipients) + ")")
 
         if self.cc_email:
@@ -258,14 +294,16 @@ class OutlookEmail(EmailInterface):
             cc_names = [f"""({QUERYDASL.CC_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.CC_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.CC_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
-                       {QUERYDASL.CC_NAME.value} LIKE '%{name.upper()}%')""" for name in self.cc]
+                       {QUERYDASL.CC_NAME.value} LIKE '%{name.upper()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.CC_NAME.value} LIKE '%{name}%')""" for name in self.cc]
             query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(cc_names) + ")")
 
         if self.bcc:
             bcc_names = [f"""({QUERYDASL.BCC_NAME.value} LIKE '%{name.lower()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.BCC_NAME.value} LIKE '%{name.title()}%' {LOGICOPERATOR.OR.value}
                        {QUERYDASL.BCC_NAME.value} LIKE '%{name.capitalize()}%' {LOGICOPERATOR.OR.value}
-                       {QUERYDASL.BCC_NAME.value} LIKE '%{name.upper()}%')""" for name in self.bcc]
+                       {QUERYDASL.BCC_NAME.value} LIKE '%{name.upper()}%' {LOGICOPERATOR.OR.value}
+                       {QUERYDASL.BCC_NAME.value} LIKE '%{name}%')""" for name in self.bcc]
             query_parts.append(f"(" + f" {self.logic_operator_between_recipients.value} ".join(bcc_names) + ")")
 
         if self.body:
@@ -274,21 +312,23 @@ class OutlookEmail(EmailInterface):
                 query_parts.append(f"""({QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}' {LOGICOPERATOR.OR.value} 
                                    {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.upper()}' {LOGICOPERATOR.OR.value} 
                                    {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.title()}' {LOGICOPERATOR.OR.value} 
-                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}')""")
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}')""")
             else:
                 body_value = f"%{self.body.lower()}%"
                 query_parts.append(f"""({QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}' {LOGICOPERATOR.OR.value} 
                                    {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.upper()}' {LOGICOPERATOR.OR.value} 
                                    {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.title()}' {LOGICOPERATOR.OR.value} 
-                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}')""")
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value.capitalize()}' {LOGICOPERATOR.OR.value} 
+                                   {QUERYDASL.BODY_TEXT_IPM_NOTE.value} LIKE '{body_value}')""")
 
         if self.has_attachments is not None:
             has_attachments_value = 1 if self.has_attachments else 0
-            query_parts.append(f"({QUERYDASL.HAS_ATTACHMENTS.value} = {has_attachments_value})")
+            query_parts.append(f"({QUERYDASL.HAS_ATTACHMENTS_IPM_NOTE.value} = {has_attachments_value})")
             
         if self.is_read is not None:
             is_read_value = 1 if self.is_read else 0
-            query_parts.append(f"({QUERYDASL.IS_READ.value} = {is_read_value})")
+            query_parts.append(f"({QUERYDASL.IS_READ_IPM_NOTE.value} = {is_read_value})")
 
         if self.received_after and self.received_before:
             if self.received_after > self.received_before:
@@ -313,24 +353,35 @@ class OutlookEmail(EmailInterface):
             
         if self.conversation_topic:
             if "%" in self.conversation_topic:
-                query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) LIKE '{self.conversation_topic.lower()}')")
+                query_parts.append(f"""({QUERYDASL.CONVERSATION_TOPIC.value} LIKE '{self.conversation_topic.lower()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} LIKE '{self.conversation_topic.upper()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} LIKE '{self.conversation_topic.title()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} LIKE '{self.conversation_topic.capitalize()}'
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} LIKE '%{self.conversation_topic}%')""")
             else:
-                query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.CONVERSATION_TOPIC.value}) = '{self.conversation_topic.lower()}')")
-        
+                query_parts.append(f"""({QUERYDASL.CONVERSATION_TOPIC.value} = '{self.conversation_topic.lower()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} = '{self.conversation_topic.upper()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} = '{self.conversation_topic.title()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} = '{self.conversation_topic.capitalize()}'
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.CONVERSATION_TOPIC.value} = '{self.conversation_topic}')""")
+
         if self.referenceid:
             references = [f"{QUERYDASL.REFERENCE_ID.value} = '{ref}'" for ref in self.referenceid]
-            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND (" + " OR ".join(references) + "))")
-            
+            query_parts.append(f"(" + " OR ".join(references) + "))")
         if self.msg_id:
             msgids = [f"{QUERYDASL.ID_IPM_NOTE.value} = '{ref}'" for ref in self.msg_id]
-            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND (" + " OR ".join(msgids) + "))")
+            query_parts.append(f"(" + " OR ".join(msgids) + "))")
 
         if self.importance_email:
-            query_parts.append(f"((LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND {QUERYDASL.IMPORTANCE_IPM_NOTE.value} = {self.importance_email.value})")
+            query_parts.append(f"({QUERYDASL.IMPORTANCE_IPM_NOTE.value} = {self.importance_email.value})")
             
         if self.subject_prefix:
-            query_parts.append(f"(LOWER({QUERYDASL.MSGCLASS_IPM_NOTE.value}) LIKE '%ipm.note%' AND LOWER({QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value}) = '{self.subject_prefix.value.lower()}')")
-            
+            query_parts.append(f"""({QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value} = '{self.subject_prefix.value.lower()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value} = '{self.subject_prefix.value.upper()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value} = '{self.subject_prefix.value.title()}' 
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value} = '{self.subject_prefix.value.capitalize()}'
+                                   {LOGICOPERATOR.OR.value} {QUERYDASL.SUBJECT_PREFIX_IPM_NOTE.value} = '{self.subject_prefix.value}')""")
+
         if not query_parts:
             query = None
         else:
@@ -338,7 +389,10 @@ class OutlookEmail(EmailInterface):
             
         return query
         
-         
+    
+    #################################################################################################################################
+    #####                               Función para obtener el correo SMTP del remitente                                   #########
+    #################################################################################################################################         
     def get_sender_smtp(self, message) -> str:
         sender = getattr(message, 'Sender', None)
         if sender is not None:
@@ -351,6 +405,10 @@ class OutlookEmail(EmailInterface):
             return getattr(message, 'SenderEmailAddress', None)
         return None
     
+    
+    #################################################################################################################################
+    #####                               Función para obtener el nombre del remitente                                        #########
+    #################################################################################################################################
     def get_sender_str(self, message) -> str:
         sender_name = getattr(message, 'SenderName', '') or ''
         sender_email = self.get_sender_smtp(message) or ''
@@ -364,7 +422,11 @@ class OutlookEmail(EmailInterface):
             sender_str = ''
             
         return sender_str
+    
         
+    #################################################################################################################################
+    #####                               Función para obtener el correo SMTP de quien recibe                                 #########
+    #################################################################################################################################    
     def get_recipient_smtp(self, recipient) -> str:
         address_entry = getattr(recipient, 'AddressEntry', None)
         if address_entry is not None:
@@ -375,6 +437,10 @@ class OutlookEmail(EmailInterface):
             return getattr(recipient, 'Address', None)
         return None
     
+    
+    #################################################################################################################################
+    #####                               Función para obtener el nombre de quien recibe                                      #########
+    #################################################################################################################################
     def get_recipients_str(self, message, recipient_type) -> str:
         recipients = getattr(message, 'Recipients', [])
         if recipient_type is not None:
@@ -391,6 +457,10 @@ class OutlookEmail(EmailInterface):
                 recipient_strs.append(email)
         return "; ".join(recipient_strs)
     
+    
+    #################################################################################################################################
+    #####                               Función para obtener el correo SMTP del organizador                                 #########
+    #################################################################################################################################    
     def get_organizer_smtp(self, message) -> str:
         organizer = getattr(message, 'Organizer', None)
         if not organizer:
@@ -406,6 +476,10 @@ class OutlookEmail(EmailInterface):
         # Si no se encuentra, devolver solo el nombre
         return organizer
     
+    
+    #################################################################################################################################
+    #####                               Función para obtener el nombre del organizador                                      #########
+    #################################################################################################################################
     def get_meeting_organizer(self, message) -> str:
         organizer = getattr(message, 'Organizer', None)
         if organizer:
@@ -416,6 +490,10 @@ class OutlookEmail(EmailInterface):
         # Opcional: buscar en Recipients si coincide el nombre
         return ''
     
+    
+    #################################################################################################################################
+    #####                          Función para obtener la fecha y hora de inicio de la solicitud de reunión                #########
+    #################################################################################################################################
     def get_meeting_start(self, message):
         for attr in ['Start', 'StartUTC', 'MeetingStartTime', 'OriginalStart', 'AppointmentStart']:
             value = getattr(message, attr, None)
@@ -429,6 +507,10 @@ class OutlookEmail(EmailInterface):
                     return format_datetime(start)
         return None
     
+    
+    #################################################################################################################################
+    #####                          Función para obtener la fecha y hora de fin de la solicitud de reunión                   #########
+    #################################################################################################################################    
     def get_meeting_end(self, message):
         for attr in ['End', 'EndUTC', 'MeetingEndTime', 'OriginalEnd', 'AppointmentEnd']:
             value = getattr(message, attr, None)
@@ -454,9 +536,9 @@ class OutlookEmail(EmailInterface):
         return None
     
     
-    
-    
-    
+    #################################################################################################################################
+    #####                          Función para obtener la ruta de las carpetas de Outlook                                  #########
+    #################################################################################################################################
     def get_path_folders(self) -> list:
         list_paths = []
         for i in range(1, self._conn.Folders.Count + 1):
@@ -470,3 +552,190 @@ class OutlookEmail(EmailInterface):
                     #print(f"  Carpeta: {folder.Name} - Path: {path}")
             
         return list_paths
+    
+    #################################################################################################################################
+    #####                          Función para descargar el adjunto de los correos solicitados                             #########
+    #################################################################################################################################
+    def download_attachments(self, datadownloadattachments: DataDownloadAttachments):
+        
+        start = time()
+        #########################################################################################
+        #####     Obtengo todos los parámetros para descagar los adjuntos de los emails #########
+        #########################################################################################
+        self.store_folder = datadownloadattachments.store_folder if datadownloadattachments.store_folder else self.authenticated_email
+        self.path_download_folder = Path(datadownloadattachments.download_folder)
+        self.path_download_folder.mkdir(parents=True, exist_ok=True)
+        self.overwrite = datadownloadattachments.overwrite
+        self.mark_as_read = datadownloadattachments.mark_as_read
+        self.only_filenames = datadownloadattachments.only_filenames or []
+        self.only_extensions = datadownloadattachments.only_extensions or []
+        self.ignore_extensions = datadownloadattachments.ignore_extensions or []
+        self.ignore_filenames = datadownloadattachments.ignore_filenames or []
+        self.create_subfolder_per_email = datadownloadattachments.create_subfolder_per_email
+        self.standard_folders = datadownloadattachments.standard_folder
+        self.custom_folder = datadownloadattachments.custom_folder
+        self.subfolder_name = datadownloadattachments.name_subfolder_per_email if datadownloadattachments.name_subfolder_per_email else "{index}_{subject}_{receiveddate}"
+
+        #########################################################################################
+        #####               Creo el query para obtener los emails                       #########
+        #########################################################################################
+        self.datafilter = datadownloadattachments.filters
+        self.query = self.create_query(self.datafilter) if self.datafilter else None
+        if not self.query:
+            raise ValueError("No se pudo crear la consulta DASL para filtrar los correos por ID.")
+        
+        folder = self.validate_folder(self.standard_folders, self.custom_folder)
+                
+        filtered_messages = folder.Items.Restrict(self.query)
+        self.tiempo_transformacion_datos = time() - start
+        tiempo_transformacion_datos_acumulado = self.tiempo_transformacion_datos + self.tiempo_transformacion_datos_acumulado
+        tiempo_transformacion_datos = segundos_a_horas_minutos_segundos(tiempo_transformacion_datos_acumulado)
+        self.total_adjuntos = self.count_att_filtered(filtered_messages, self.only_extensions, self.only_filenames, self.ignore_extensions, self.ignore_filenames)
+        self.total_emails = filtered_messages.Count
+        
+        
+        
+        
+        
+        email_download_list = []
+        start=time()
+
+        for i, messages in enumerate(filtered_messages):
+            attachments_files = []
+            attachments_filenames = [getattr(att, 'FileName', None) for att in getattr(messages, 'Attachments', []) if getattr(att, 'FileName', None) is not None]
+            
+            attachments_files = [
+                att for att in attachments_filenames
+                if att is not None
+                and not any(att.endswith(ext) for ext in self.ignore_extensions)
+                and att not in self.ignore_filenames
+            ]
+
+            # Si hay filtros de inclusión, aplicar
+            if self.only_extensions or self.only_filenames:
+                attachments_files = [
+                    att for att in attachments_files
+                    if (any(att.endswith(ext) for ext in self.only_extensions) 
+                        or att in self.only_filenames)
+                ]
+
+            
+                
+            
+                  
+            email_data={
+                'MessageID': getattr(messages, 'EntryID', None),
+                'Subject': remove_emojis(getattr(messages, 'Subject', None)),
+                'ReceivedTime': format_date_folder(getattr(messages, 'ReceivedTime', None), DateTypes.DATETIME.value),
+                'Num_of_Attachments': getattr(getattr(messages, 'Attachments', None), 'Count', 0),
+                'IsRead': getattr(messages, 'UnRead', None) == 0,
+                'Attachments': attachments_files,
+                
+            }
+            subfolder_name = self.subfolder_name
+            
+            if "{subject}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{subject}", email_data.get('Subject', 'No_Subject').strip() or 'No_Subject')
+            if "{recivedtime}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{recivedtime}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value))
+            if "{reciveddate}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{reciveddate}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATE.value))
+            if "{sender_mail}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{sender_mail}", self.get_sender_str(messages).strip() or 'No_Sender')
+            if "{index}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{index}", str(i + 1))
+
+            self.email_folder = f"{subfolder_name}".strip() or f"{i+1}_{email_data.get('Subject', 'No_Subject').strip() or 'No_Subject'}_{format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value)}"
+
+            self.folder_path = self.path_download_folder / (self.email_folder if self.create_subfolder_per_email else "")
+            self.folder_path.mkdir(parents=True, exist_ok=True)
+            
+            email_data['Folder_path'] = str(self.folder_path)
+
+            
+
+
+            self.file_paths = [self.folder_path / f"{file_name}" for file_name in email_data['Attachments']]
+            
+            if i == 0:
+                total_att_downloaded = 0
+                current_att_downloaded = 0
+
+            for j, dest_path in enumerate(self.file_paths):
+                if dest_path.exists() and not self.overwrite:
+                    #print(f"El archivo {dest_path} ya existe y overwrite está establecido en False. Saltando descarga.")
+                    continue
+                elif dest_path.exists() and self.overwrite:
+                    #print(f"El archivo {dest_path} ya existe pero overwrite está establecido en True. Sobrescribiendo archivo.")
+                    dest_path.unlink()
+                
+                try:
+                    attachment = next((att for att in getattr(messages, 'Attachments', []) if getattr(att, 'FileName', None) == dest_path.name), None)
+                    if attachment:
+                        attachment.SaveAsFile(str(dest_path))
+                        self.tiempo_descarga_adjuntos = time() - start
+                        
+                                    #print(f"Adjunto guardado: {dest_path}")
+                    #else:
+                    #    print(f"No se encontró el adjunto {dest_path.name} en el correo {email_data['MessageID']}.")
+                except Exception as e:
+                    raise Exception(f"Error al guardar el adjunto {dest_path}: {e}")
+                
+                os.system('cls' if os.name == 'nt' else 'clear')
+                current_att_downloaded = 1 + j
+                total_att_downloaded += current_att_downloaded
+                
+                self.tiempo_descarga_adjuntos = time() - start
+
+                print(f"""
+                            ---------------------------------------------------------------------------------------------------------
+                                Total Emails to download --> {self.total_emails}, Total Attachments --> {self.total_adjuntos}
+                                folder_name --> {self.email_folder}
+                                Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
+                                Attachments downloaded --> {total_att_downloaded} of {self.total_adjuntos} ({round(((total_att_downloaded)/self.total_adjuntos)*100,2)}%)
+                                Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
+                                Tiempo en descarga de adjuntos --> {segundos_a_horas_minutos_segundos(self.tiempo_descarga_adjuntos)}
+                            ---------------------------------------------------------------------------------------------------------""")
+
+            if self.mark_as_read and not email_data['IsRead']:
+                try:
+                    messages.UnRead = False
+                    messages.Save()
+                    #print(f"El correo {email_data['MessageID']} ha sido marcado como leído.")
+                except Exception as e:
+                    raise Exception(f"Error al marcar el correo {email_data['MessageID']} como leído: {e}")
+            
+            
+
+            email_download_list.append(email_data)
+    
+        df_emails_attachments = pd.DataFrame(email_download_list)
+        
+        return df_emails_attachments
+    
+    
+
+
+    def count_att_filtered (self, filtered_messages, only_extensions, only_filenames, ignore_extensions, ignore_filenames) -> int:
+        total_attachments = 0
+        for msg in filtered_messages:
+            attachments_filenames = [getattr(att, 'FileName', None) for att in getattr(msg, 'Attachments', []) if getattr(att, 'FileName', None) is not None]
+            attachments_files = [
+                att for att in attachments_filenames
+                if att is not None
+                and not any(att.endswith(ext) for ext in ignore_extensions)
+                and att not in ignore_filenames
+            ]
+            if only_extensions or only_filenames:
+                attachments_files = [
+                    att for att in attachments_files
+                    if (any(att.endswith(ext) for ext in self.only_extensions) 
+                        or att in self.only_filenames)
+                ]
+            total_attachments += len(attachments_files)
+        return total_attachments
+
+
+
+
+

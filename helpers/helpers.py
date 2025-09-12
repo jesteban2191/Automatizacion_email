@@ -80,3 +80,9 @@ def format_datetime(dt):
     if isinstance(dt, datetime.datetime) or isinstance(dt, pywintypes.datetime):
         return dt.strftime('%d/%m/%Y %H:%M:%S')
     return ''
+
+def format_date_folder(dt, type_dt: str = "%Y%m%d_%H%M%S"):
+    import pywintypes
+    if isinstance(dt, datetime.datetime) or isinstance(dt, pywintypes.datetime):
+        return dt.strftime(type_dt)
+    return ''

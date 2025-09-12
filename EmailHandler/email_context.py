@@ -1,5 +1,5 @@
 from .outlook_email import OutlookEmail
-from ..common import DataGetEmails, DataFiltersEmails
+from ..common import DataGetEmails, DataFiltersEmails, DataDownloadAttachments
 import win32com.client
 
 class EmailContext:
@@ -15,5 +15,8 @@ class EmailContext:
     
     def create_query(self, datafiltersemails: DataFiltersEmails):
         return self.email_handler.create_query(datafiltersemails)
+    
+    def download_attachments(self, datadownloadattachments: DataDownloadAttachments):
+        return self.email_handler.download_attachments(datadownloadattachments)
     
     

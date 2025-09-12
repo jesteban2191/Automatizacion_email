@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from enum import Enum
 from datetime import datetime
@@ -47,6 +47,10 @@ class SUBJECTPREFIX(str, Enum):
     TR = 'Tr:'
     RES = 'Res:'
     ENC = 'Enc:'
+    
+class DateTypes(str, Enum):
+    DATE = '%Y%m%d'
+    DATETIME = '%Y%m%d_%H%M%S'
 
 class QUERYDASL(str, Enum):
     
@@ -182,13 +186,13 @@ class DataFiltersEmails(BaseModel):
     bcc_email: Optional[list[str]] = None  # Lista de emails en copia oculta
     cc: Optional[list[str]] = None  # Lista de nombres en copia
     bcc: Optional[list[str]] = None  # Lista de nombres en copia oculta
-    has_attachments: Optional[bool] = None
-    is_read: Optional[bool] = None
     received_after: Optional[datetime] = None  # ISO format date string
     received_before: Optional[datetime] = None  # ISO format date string
     conversation_topic: Optional[str] = None  # Corresponde al asunto del hilo de conversación (conversation topic)
     referenceid: Optional[list[str]] = None  # Corresponde al Message-ID de los emails referenciados (header References)
     msg_id: Optional[list[str]] = None  # Corresponde al Message-ID del email (header)
+    has_attachments: Optional[bool] = None
+    is_read: Optional[bool] = None
     importance_email: Optional[IMPORTANCEEMAIL] = None  # IMPORTANCEEMAIL Enum
     logic_operator: Optional[LOGICOPERATOR] = LOGICOPERATOR.AND  # 'AND' o 'OR'
     logic_operator_between_senders: Optional[LOGICOPERATOR] = LOGICOPERATOR.OR  # 'AND' o 'OR' entre los remitentes
@@ -225,13 +229,14 @@ class DataFiltersEmails(BaseModel):
     
 
 class DataGetEmails(BaseModel):
-    store_folder: str
     standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
+    store_folder: Optional[str] = None  # Correo o buzón donde se encuentra la carpeta, si es None, se usa el correo autenticado
     custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
     max_emails: Optional[int] = 500  # Número máximo de emails a obtener
     filters: Optional[DataFiltersEmails] = None
     mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
     page_next: Optional[int] = None # Página siguiente a obtener, si es None, se obtiene la primera página
+    
     
     @field_validator('custom_folder', mode='before')
     def validate_custom_folder(cls, v):
@@ -239,15 +244,18 @@ class DataGetEmails(BaseModel):
             return v
         # Aquí puedes agregar validaciones específicas para la carpeta personalizada
         v = v.replace('\\', '/')
-        folder_regex = r'^[\w/]+$'
+        folder_regex = r'^[\w]+(\/[\w]+)*$'
         if not re.match(folder_regex, v):
             raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
         return v
     
 
 class DataDownloadAttachments(BaseModel):
-    email_ids: list[str]
     download_folder: str
+    filters: Optional[DataFiltersEmails] = None
+    store_folder: Optional[str] = None  # Correo o buzón donde se encuentra la carpeta, si es None, se usa el correo autenticado
+    standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
+    custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
     mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
     overwrite: Optional[bool] = True  # Sobrescribir archivos si ya existen
     only_filenames: Optional[list[str]] = None  # Si se especifica, solo se descargan los archivos con estos nombres
@@ -255,6 +263,7 @@ class DataDownloadAttachments(BaseModel):
     ignore_extensions: Optional[list[str]] = None  # Si se especifica, no se descargan los archivos con estas extensiones (sin el punto)
     ignore_filenames: Optional[list[str]] = None  # Si se especifica, no se descargan los archivos con estos nombres
     create_subfolder_per_email: Optional[bool] = True  # Crear una subcarpeta por cada email, nombrada con el nombre y fecha de cada correo
+    name_subfolder_per_email: Optional[str] = None  # Sufijo para la subcarpeta por email, si create_subfolder_per_email es True
     
     @field_validator('only_extensions', 'ignore_extensions', mode='before')
     def validate_extensions(cls, v):
@@ -274,6 +283,17 @@ class DataDownloadAttachments(BaseModel):
         
         filenames = [s.replace('.', '') if s.startswith('.') else s.split('.')[0] for s in v]
         return filenames
+    
+    @field_validator('custom_folder', mode='before')
+    def validate_custom_folder(cls, v):
+        if v is None:
+            return v
+        # Aquí puedes agregar validaciones específicas para la carpeta personalizada
+        v = v.replace('\\', '/')
+        folder_regex = r'^[\w]+(\/[\w]+)*$'
+        if not re.match(folder_regex, v):
+            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
+        return v
 
     @field_validator('download_folder', mode='before')
     def validate_download_folder(cls, v):
@@ -281,7 +301,45 @@ class DataDownloadAttachments(BaseModel):
             return v
         # Aquí puedes agregar validaciones específicas para la carpeta de descarga
         v = v.replace('\\', '/')
-        folder_regex = r'^[\w/]+$'
+        folder_regex = r'^[\w\:\.]+(\/[\w\:\.-]+)*$'
         if not re.match(folder_regex, v):
             raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
         return v
+    
+    @field_validator('filters', mode='before')
+    def validate_filters(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, DataFiltersEmails):
+            raise ValueError("Los filtros deben ser una instancia de DataFiltersEmails.")
+        v.has_attachments = True
+        keys_to_check = [
+        'subject', 'body', 'sender', 'recipient', 'sender_email', 'recipient_email',
+        'cc_email', 'bcc_email', 'cc', 'bcc', 'received_after', 'received_before',
+        'conversation_topic', 'referenceid', 'msg_id'
+        ]
+        filtros_validos = '\n'.join(keys_to_check)
+        if not any(getattr(v, key, None) for key in keys_to_check):
+            raise ValueError(f"""Se debe especificar al menos un filtro válido entre estos para descargar adjuntos. 
+                             Filtros Validos: {filtros_validos}""")
+        return v
+    
+    @model_validator(mode='after')
+    def check_dependencies_values(cls, values):
+        only_ext = values.only_extensions
+        only_files = values.only_filenames
+        ignore_ext = values.ignore_extensions
+        ignore_files = values.ignore_filenames
+        subfolder_per_email = values.create_subfolder_per_email
+        name_subfolder = values.name_subfolder_per_email
+        
+        if only_ext == ignore_ext and not (only_ext is None and ignore_ext is None):
+            raise ValueError("only_extensions e ignore_extensions no pueden ser iguales.")
+        if only_files == ignore_files and not (only_files is None and ignore_files is None):
+            raise ValueError("only_filenames e ignore_filenames no pueden ser iguales.")
+        if not subfolder_per_email and name_subfolder is not None:
+            values.name_subfolder_per_email = None  # Ignorar el sufijo si no se crean subcarpetas
+
+
+
+        return values
