@@ -1,12 +1,12 @@
 from .email_interface import EmailInterface
-from ..common import ConnectionInfo, DataGetEmails, DataFiltersEmails, QUERYDASL, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments
+from ..common import ConnectionInfo, DataGetEmails, DataFiltersEmails, QUERYDASL, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments, DataSendEmail, EmailAttachmentInfo
 import win32com.client
 import pythoncom
 import re
 import pandas as pd
 from time import time
 from ..helpers import segundos_a_horas_minutos_segundos, remove_emojis, format_datetime, format_date_folder
-from ..common import OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr, OutlookStandarFolders, DateTypes
+from ..common import OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr, OutlookStandarFolders, DateTypes, OUTLOOKTYPEELEMENT, OUTLOOKTYPEATTACHMENTS
 import os
 from pathlib import Path
 from typing import Optional
@@ -14,8 +14,9 @@ from datetime import datetime
 
 class OutlookEmail(EmailInterface):
 
-    def __init__(self, conn: win32com.client.CDispatch):
+    def __init__(self, conn: win32com.client.CDispatch, app: win32com.client.CDispatch):
         self._conn = conn # Este es el objeto Namespace autenticado
+        self._app = app
         self.tiempo_transformacion_datos_acumulado = 0
         self.tiempo_descarga_acumulado = 0
         self.authenticated_email = self.get_main_mailbox_name()
@@ -30,12 +31,14 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####          Obtengo todos los parámetros para descagar los emails            #########
         #########################################################################################
-        self.store_folder = datagetemails.store_folder if datagetemails.store_folder else self.authenticated_email
-        self.standard_folders = datagetemails.standard_folder
-        self.custom_folder = datagetemails.custom_folder
+        self.store_folder = datagetemails.store_folder_mail if datagetemails.store_folder_mail else self.authenticated_email
+        self.standard_folders = datagetemails.standard_folder_mail
+        self.custom_folder = datagetemails.custom_folder_mail
         self.max_emails = datagetemails.max_emails
         self.mark_as_read = datagetemails.mark_as_read
         self.page_next = datagetemails.page_next
+        self.download_attachments = datagetemails.download_attachments
+        self.attachments_settings = datagetemails.attachments_settings if datagetemails.attachments_settings else None
         self.tiempo_descarga = 0
         self.tiempo_transformacion_datos = 0
         self.tiempo_transformacion_datos_acumulado = 0 if self.page_next is None else self.tiempo_transformacion_datos_acumulado
@@ -54,7 +57,23 @@ class OutlookEmail(EmailInterface):
             self.query = None
             
         print(f"Query creado: {self.query}")
+        
+        
+        #########################################################################################
+        #####      Preparo la configuración de descarga de adjuntos si es necesario     #########
+        #########################################################################################
+        if self.download_attachments:
             
+            self.path_download_folder = Path(self.attachments_settings.download_folder)
+            self.path_download_folder.mkdir(parents=True, exist_ok=True)
+            self.overwrite = self.attachments_settings.overwrite
+            self.only_filenames = self.attachments_settings.only_filenames or []
+            self.only_extensions = self.attachments_settings.only_extensions or []
+            self.ignore_extensions = self.attachments_settings.ignore_extensions or []
+            self.ignore_filenames = self.attachments_settings.ignore_filenames or []
+            self.create_subfolder_per_email = self.attachments_settings.create_subfolder_per_email
+            self.subfolder_name = self.attachments_settings.name_subfolder_per_email if self.attachments_settings.name_subfolder_per_email else "{index}_{subject}_{receiveddate}"
+
         #########################################################################################
         #####               Obtengo los emails según los parámetros                     #########
         #########################################################################################
@@ -81,11 +100,9 @@ class OutlookEmail(EmailInterface):
         self.start = (self.page_number - 1) * self.page_size
         self.end = self.start + self.page_size
         filtered_messages = list(filtered_messages)  # Convierte a lista para poder hacer slicing
-        filtered_messages = filtered_messages[self.start:self.end]
-        
+        filtered_messages = filtered_messages[self.start:self.end]        
         self.page_next_result = self.page_number + 1 if self.end < self.total_emails else None
-        
-
+        self.total_adjuntos = self.count_att_filtered(filtered_messages, self.only_extensions, self.only_filenames, self.ignore_extensions, self.ignore_filenames) if self.download_attachments else 0
 
         emails = []
         
@@ -95,6 +112,9 @@ class OutlookEmail(EmailInterface):
             message_class = getattr(message, 'MessageClass', None)
             is_mail = message_class == 'IPM.Note'
             is_appointment = message_class in ['IPM.Appointment', 'IPM.Schedule.Meeting.Request']
+            
+            attachments_files = self.get_list_of_attachments_filtered(message, self.only_extensions, self.only_filenames, self.ignore_extensions, self.ignore_filenames) if self.download_attachments else []
+            
 
             if is_mail:
                 email_data = {
@@ -139,17 +159,96 @@ class OutlookEmail(EmailInterface):
                     'Subject': getattr(message, 'Subject', None),
                     'MessageClass': message_class,
                 }
+                
+            if self.download_attachments:
+                #########################################################################################
+                #####               Aquí voy a descargar los adjuntos que correspondan          #########
+                #########################################################################################
+                folder_path = self.create_folder_to_download_attachments(message, self.path_download_folder, self.subfolder_name, email_data, self.create_subfolder_per_email, i) if attachments_files else None
+
+                file_paths = [folder_path / file_name for file_name in attachments_files] if folder_path else []
+
+                if file_paths:
+                    folder_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    folder_path = None
+                
+                if i == 0:
+                    total_att_downloaded = 0
+                    current_att_downloaded = 0
+                    
+                if file_paths:
+                    #########################################################################################
+                    #####               Sí hay archivos que descargar los descargo               #########
+                    #########################################################################################
+                    for j, dest_path in enumerate(file_paths):
+                        if dest_path.exists() and not self.overwrite:
+                            #print(f"El archivo {dest_path} ya existe y overwrite está establecido en False. Saltando descarga.")
+                            continue
+                        elif dest_path.exists() and self.overwrite:
+                            #print(f"El archivo {dest_path} ya existe pero overwrite está establecido en True. Sobrescribiendo archivo.")
+                            dest_path.unlink()
+                            
+                        try:
+                            attachment = next((att for att in getattr(message, 'Attachments', []) if getattr(att, 'FileName', None) == dest_path.name), None)
+                            if attachment:
+                                attachment.SaveAsFile(str(dest_path))
+                                self.tiempo_descarga_adjuntos = time() - start
+                        except Exception as e:
+                            raise Exception(f"Error al guardar el adjunto {dest_path}: {e}")
+                        
+                        current_att_downloaded = 1 + j
+                        total_att_downloaded += current_att_downloaded
+                        os.system('cls' if os.name == 'nt' else 'clear')
+                        self.tiempo_descarga = time() - start
+                        tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
+                        print(f"""
+                                ---------------------------------------------------------------------------------------------------------
+                                    Total Emails to download --> {self.total_emails}, current_page --> {self.page_number}, page_size --> {self.page_size}
+                                    Total Attachments --> {self.total_adjuntos}
+                                    folder_name --> {folder_path if folder_path else "No folder created"}
+                                    Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
+                                    Attachments downloaded --> {total_att_downloaded} of {self.total_adjuntos} ({round(((total_att_downloaded)/self.total_adjuntos)*100,2)}%)
+                                    Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
+                                    Tiempo en descarga de adjuntos --> {segundos_a_horas_minutos_segundos(self.tiempo_descarga_acumulado)}
+                                ---------------------------------------------------------------------------------------------------------""")
+                else:
+                    #########################################################################################
+                    #####    Si no tengo adjuntos que descargar en el correo actual, continuo       #########
+                    #########################################################################################
+                    os.system('cls' if os.name == 'nt' else 'clear')
+                    self.tiempo_descarga = time() - start
+                    tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
+                    print(f"""
+                            ---------------------------------------------------------------------------------------------------------
+                                Total Emails to download --> {self.total_emails}, current_page --> {self.page_number}, page_size --> {self.page_size}
+                                Total Attachments --> {self.total_adjuntos}
+                                folder_name --> {folder_path if folder_path else "No folder created"}
+                                Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
+                                Attachments downloaded --> {total_att_downloaded} of {self.total_adjuntos} ({round(((total_att_downloaded)/self.total_adjuntos)*100,2)}%)
+                                Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
+                                Tiempo en descarga de adjuntos --> {segundos_a_horas_minutos_segundos(self.tiempo_descarga_acumulado)}
+                            ---------------------------------------------------------------------------------------------------------""")
+                
+                email_data['Attachment_Folder'] = str(folder_path) if folder_path else "No folder created"
+                
+            else:
+                #########################################################################################
+                #####    En caso de no tener que descargar adjuntos                             #########
+                #########################################################################################
+                self.tiempo_descarga = time() - start
+                tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
+                os.system('cls')
+                print(f"""
+                    -------------------------------------------------------------------------------------------------
+                            Total Emails to download --> {self.total_emails}, current_page --> {self.page_number}, page_size --> {self.page_size}
+                            Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
+                            Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
+                            Tiempo en descarga de datos --> {segundos_a_horas_minutos_segundos(tiempo_descarga_acumulado)}
+                    --------------------------------------------------------------------------------------------------""")
+            
+            
             emails.append(email_data)
-            self.tiempo_descarga = time() - start
-            tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
-            os.system('cls')
-            print(f"""
-                  -------------------------------------------------------------------------------------------------
-                        Total Emails to download --> {self.total_emails}, current_page --> {self.page_number}, page_size --> {self.page_size}
-                        Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
-                        Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
-                        Tiempo en descarga de datos --> {segundos_a_horas_minutos_segundos(tiempo_descarga_acumulado)}
-                  --------------------------------------------------------------------------------------------------""")
             
         df_emails = pd.DataFrame(emails)
         
@@ -714,8 +813,59 @@ class OutlookEmail(EmailInterface):
         return df_emails_attachments
     
     
+    #################################################################################################################################
+    #####                          Función obtener los adjuntos que cumplen con los requisitos                              #########
+    #################################################################################################################################
+    def get_list_of_attachments_filtered (self, messages, only_extensions, only_filenames, ignore_extensions, ignore_filenames) -> list:
+        
+        attachments_files = []
+        attachments_filenames = [getattr(att, 'FileName', None) for att in getattr(messages, 'Attachments', []) if getattr(att, 'FileName', None) is not None]
+        
+        attachments_files = [
+            att for att in attachments_filenames
+            if att is not None
+            and not any(att.endswith(ext) for ext in ignore_extensions)
+            and att not in ignore_filenames
+        ]
 
+        # Si hay filtros de inclusión, aplicar
+        if only_extensions or only_filenames:
+            attachments_files = [
+                att for att in attachments_files
+                if (any(att.endswith(ext) for ext in only_extensions) 
+                    or att in only_filenames)
+            ]
+            
+        return attachments_files
 
+    #################################################################################################################################
+    #####                   Función para crear la carpeta donde se van a guardar los adjuntos descargados                   #########
+    #################################################################################################################################
+    def create_folder_to_download_attachments (self, messages, path_download_folder,subfolder_name, email_data, create_subfolder_per_email, index) -> Path:
+
+            if "{subject}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{subject}", email_data.get('Subject', 'No_Subject').strip() or 'No_Subject')
+            if "{recivedtime}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{recivedtime}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value))
+            if "{reciveddate}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{reciveddate}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATE.value))
+            if "{sender_mail}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{sender_mail}", self.get_sender_str(messages).strip() or 'No_Sender')
+            if "{index}" in subfolder_name:
+                subfolder_name = subfolder_name.replace("{index}", str(index + 1))
+
+            email_folder = f"{subfolder_name}".strip() or f"{index + 1}_{email_data.get('Subject', 'No_Subject').strip() or 'No_Subject'}_{format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value)}"
+
+            folder_path = path_download_folder / (email_folder if create_subfolder_per_email else "")
+            
+            return folder_path
+            
+            
+            
+    
+    #################################################################################################################################
+    #####                          Función para contar los adjuntos a descargar                                             #########
+    #################################################################################################################################
     def count_att_filtered (self, filtered_messages, only_extensions, only_filenames, ignore_extensions, ignore_filenames) -> int:
         total_attachments = 0
         for msg in filtered_messages:
@@ -739,3 +889,113 @@ class OutlookEmail(EmailInterface):
 
 
 
+    #################################################################################################################################
+    #####                          Función para enviar correos con o sin adjuntos                                           #########
+    #################################################################################################################################
+    def send_email(self, datasentemail: DataSendEmail):
+        #########################################################################################
+        #####     Obtengo todos los parámetros para enviar los emails con o sin adjuntos #########
+        #########################################################################################
+        self.subject = DataSendEmail.subject if DataSendEmail.subject else "No Subject"
+        self.body = DataSendEmail.body if DataSendEmail.body else ""
+        self.to_recipients = DataSendEmail.to_recipients_email if DataSendEmail.to_recipients_email else []
+        self.cc_recipients = DataSendEmail.cc_recipients_email if DataSendEmail.cc_recipients_email else []
+        self.bcc_recipients = DataSendEmail.bcc_recipients_email if DataSendEmail.bcc_recipients_email else []
+        self.importance_email = DataSendEmail.importance_email if DataSendEmail.importance_email else IMPORTANCEEMAIL.NORMAL
+        self.attachments = DataSendEmail.attachments if DataSendEmail.attachments else []
+        self.is_html = DataSendEmail.is_html
+        self.body = datasentemail.body if datasentemail.body else ""
+        self.read_receipt = DataSendEmail.read_receipt
+        self.delivery_receipt = DataSendEmail.delivery_receipt # Solicitar acuse de entrega
+        self.send_on_behalf = DataSendEmail.send_on_behalf # Enviar en nombre de otro usuario (debe tener permisos)
+        self.save_copy_sent_items = DataSendEmail.save_copy_sent_items # Guardar una copia en la carpeta de elementos enviados
+        self.connection_info = DataSendEmail.connection_info
+
+        #########################################################################################
+        #####               Creo el objeto del email nuevo                              #########
+        #########################################################################################
+        email = self._app.CreateItem(OUTLOOKTYPEELEMENT.MAIL.value)  # 0 indica un nuevo correo
+        
+        #########################################################################################
+        #####               Empiezo a armar las partes del correo nuevo                 #########
+        #########################################################################################
+        email.subject = self.subject
+        email.body = self.body if not self.is_html else ""
+        email.HTMLBody = self.body if self.is_html else ""
+        email.importance = self.importance_email.value  # 1=Alta, 2=Normal, 3=Baja
+        email.To = "; ".join(self.to_recipients) if self.to_recipients else ""
+        email.CC = "; ".join(self.cc_recipients) if self.cc_recipients else ""
+        email.BCC = "; ".join(self.bcc_recipients) if self.bcc_recipients else ""
+        if self.read_receipt:
+            email.ReadReceiptRequested = True
+        if self.delivery_receipt:
+            email.DeliveryReceiptRequested = True
+            
+        #########################################################################################
+        #####       Verifico las rutas de los adjuntos y agrego los adjuntos al email      ######
+        #########################################################################################
+    
+        if self.attachments:
+            att_info = self.validate_attachments_info(self.attachments)
+
+            for att in att_info:
+                email.Attachments.Add(att['path'], 
+                                      att.get('display_name', None),
+                                      att.get('type_attachment', OUTLOOKTYPEATTACHMENTS.RegularAttachment.value),
+                                      att.get('position', 0))
+        
+        
+        #########################################################################################
+        #####               Creo el email y lo envío con o sin adjuntos                #########
+        #########################################################################################
+       
+        email_sent = {
+            'Subject': email.subject,
+            'To': email.To,
+            'CC': email.CC,
+            'BCC': email.BCC,
+            'Body': email.body if not self.is_html else email.HTMLBody,
+            'Importance': self.importance_email.name,
+            'IsHTML': self.is_html,
+            'ReadReceiptRequested': self.read_receipt,
+            'DeliveryReceiptRequested': self.delivery_receipt,
+            'Attachments': [getattr(att, 'FileName', None) for att in getattr(email, 'Attachments', []) if getattr(att, 'FileName', None) is not None],
+            'SentOnBehalfOfName': self.send_on_behalf if self.send_on_behalf else self.get_sender_str(email)
+        }
+        email.Send()
+        email_sent['SentTime'] = format_datetime(getattr(email, 'SentOn', datetime.now()))
+        email_sent['MessageID'] = getattr(email, 'EntryID', None)
+        df_email_sent = pd.DataFrame([email_sent])
+            
+        return df_email_sent
+    
+    
+    #################################################################################################################################
+    #####                          Función para enviar correos con o sin adjuntos                                           #########
+    #################################################################################################################################
+    
+    def validate_attachments_info (self, attachments: list[EmailAttachmentInfo]):
+        if not attachments:
+            return None
+        
+        att_files = []
+        for attachment in attachments:
+            path = Path(attachment.file_path)
+            if not path.exists() or not path.is_file():
+                raise FileNotFoundError(f"El archivo adjunto {attachment.file_path} no existe o no es un archivo válido.")
+
+            if attachment.display_name and not isinstance(attachment.display_name, str):
+                raise ValueError("El nombre para mostrar del adjunto debe ser una cadena de texto.")
+            
+            att_file = {
+                'path': str(path),
+                'display_name': attachment.display_name if attachment.display_name else path.name,
+                'type_attachment': attachment.type.value if attachment.type else OUTLOOKTYPEATTACHMENTS.RegularAttachment.value,
+                'position': attachment.position if attachment.position and isinstance(attachment.position, int) and attachment.position >= 0 else 0
+            }
+            att_files.append(att_file)
+            
+        return att_files
+    
+    
+    

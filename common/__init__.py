@@ -1,5 +1,5 @@
 from .DataAuth import CredentialsInfoPath, ConnectionInfo, PermisosGmail
-from .DataEmails import DataFiltersEmails, DataGetEmails, OutlookStandarFolders, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, QUERYDASL, OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr, DataDownloadAttachments, DateTypes
+from .DataEmails import DataFiltersEmails, DataGetEmails, OutlookStandarFolders, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, QUERYDASL, OUTLOOKTYPERECIPENTS, OutlookStandardFoldersstr, DataDownloadAttachments, DateTypes, DataSendEmail, OUTLOOKTYPEELEMENT, EmailAttachmentInfo, OUTLOOKTYPEATTACHMENTS
 
 __all__ = ["CredentialsInfoPath", 
            "ConnectionInfo", 
@@ -14,4 +14,8 @@ __all__ = ["CredentialsInfoPath",
            "OUTLOOKTYPERECIPENTS",
            "OutlookStandardFoldersstr",
            "DataDownloadAttachments",
-           "DateTypes"]
+           "DateTypes",
+           "DataSendEmail",
+           "OUTLOOKTYPEELEMENT",
+           "EmailAttachmentInfo",
+           "OUTLOOKTYPEATTACHMENTS"]

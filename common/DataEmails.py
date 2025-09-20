@@ -168,12 +168,25 @@ class QUERYDASL(str, Enum):
     ID_IPM_JOURNAL = 'urn:schemas:journal:uid' # Identificador único de la entrada del diario
     
 
+class OUTLOOKTYPEATTACHMENTS(int, Enum):
+    RegularAttachment = 1 # olByValue: Archivo Adjunto normal
+    ByReference = 2 # olByRef: Archivo Adjunto por referencia
+    EmbeddedOutlook = 3 # olEmbeddeditem: Elemento de Outlook incrustado
+    EmbeddedObject = 4 # olEmbeddedobject: Objeto incrustado
 
 class OUTLOOKTYPERECIPENTS(int, Enum):
     TO = 1
     CC = 2
     BCC = 3
     
+class OUTLOOKTYPEELEMENT(int, Enum):
+    MAIL = 0
+    APPOINTMENT = 1
+    CONTACT = 2
+    TASK = 3
+    STICKYNOTE = 4
+    JOURNAL = 5
+    POST = 6
 
 class DataFiltersEmails(BaseModel):
     subject: Optional[str] = None
@@ -228,35 +241,8 @@ class DataFiltersEmails(BaseModel):
         return dt  # ¡Siempre retorna el valor!
     
 
-class DataGetEmails(BaseModel):
-    standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
-    store_folder: Optional[str] = None  # Correo o buzón donde se encuentra la carpeta, si es None, se usa el correo autenticado
-    custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
-    max_emails: Optional[int] = 500  # Número máximo de emails a obtener
-    filters: Optional[DataFiltersEmails] = None
-    mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
-    page_next: Optional[int] = None # Página siguiente a obtener, si es None, se obtiene la primera página
-    
-    
-    @field_validator('custom_folder', mode='before')
-    def validate_custom_folder(cls, v):
-        if v is None:
-            return v
-        # Aquí puedes agregar validaciones específicas para la carpeta personalizada
-        v = v.replace('\\', '/')
-        folder_regex = r'^[\w]+(\/[\w]+)*$'
-        if not re.match(folder_regex, v):
-            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
-        return v
-    
-
 class DataDownloadAttachments(BaseModel):
     download_folder: str
-    filters: Optional[DataFiltersEmails] = None
-    store_folder: Optional[str] = None  # Correo o buzón donde se encuentra la carpeta, si es None, se usa el correo autenticado
-    standard_folder: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
-    custom_folder: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
-    mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
     overwrite: Optional[bool] = True  # Sobrescribir archivos si ya existen
     only_filenames: Optional[list[str]] = None  # Si se especifica, solo se descargan los archivos con estos nombres
     only_extensions: Optional[list[str]] = None  # Si se especifica, solo se descargan los archivos con estas extensiones (sin el punto)
@@ -283,17 +269,6 @@ class DataDownloadAttachments(BaseModel):
         
         filenames = [s.replace('.', '') if s.startswith('.') else s.split('.')[0] for s in v]
         return filenames
-    
-    @field_validator('custom_folder', mode='before')
-    def validate_custom_folder(cls, v):
-        if v is None:
-            return v
-        # Aquí puedes agregar validaciones específicas para la carpeta personalizada
-        v = v.replace('\\', '/')
-        folder_regex = r'^[\w]+(\/[\w]+)*$'
-        if not re.match(folder_regex, v):
-            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
-        return v
 
     @field_validator('download_folder', mode='before')
     def validate_download_folder(cls, v):
@@ -304,24 +279,6 @@ class DataDownloadAttachments(BaseModel):
         folder_regex = r'^[\w\:\.]+(\/[\w\:\.-]+)*$'
         if not re.match(folder_regex, v):
             raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
-        return v
-    
-    @field_validator('filters', mode='before')
-    def validate_filters(cls, v):
-        if v is None:
-            return v
-        if not isinstance(v, DataFiltersEmails):
-            raise ValueError("Los filtros deben ser una instancia de DataFiltersEmails.")
-        v.has_attachments = True
-        keys_to_check = [
-        'subject', 'body', 'sender', 'recipient', 'sender_email', 'recipient_email',
-        'cc_email', 'bcc_email', 'cc', 'bcc', 'received_after', 'received_before',
-        'conversation_topic', 'referenceid', 'msg_id'
-        ]
-        filtros_validos = '\n'.join(keys_to_check)
-        if not any(getattr(v, key, None) for key in keys_to_check):
-            raise ValueError(f"""Se debe especificar al menos un filtro válido entre estos para descargar adjuntos. 
-                             Filtros Validos: {filtros_validos}""")
         return v
     
     @model_validator(mode='after')
@@ -340,6 +297,98 @@ class DataDownloadAttachments(BaseModel):
         if not subfolder_per_email and name_subfolder is not None:
             values.name_subfolder_per_email = None  # Ignorar el sufijo si no se crean subcarpetas
 
+        return values
+    
+    
+class DataGetEmails(BaseModel):
+    standard_folder_mail: Optional[OutlookStandarFolders] = OutlookStandarFolders.INBOX
+    store_folder_mail: Optional[str] = None  # Correo o buzón donde se encuentra la carpeta, si es None, se usa el correo autenticado
+    custom_folder_mail: Optional[str] = None  # Esta es la ruta completa de la carpeta personalizada
+    max_emails: Optional[int] = 500  # Número máximo de emails a obtener
+    filters: Optional[DataFiltersEmails] = None
+    mark_as_read: Optional[bool] = False  # Marcar los emails obtenidos como leídos
+    page_next: Optional[int] = None # Página siguiente a obtener, si es None, se obtiene la primera página
+    download_attachments: Optional[bool] = False  # Descargar los adjuntos de los emails obtenidos
+    attachments_settings: Optional[DataDownloadAttachments] = None  # Configuración para descargar los adjuntos, si download_attachments es True
+
+    @field_validator('custom_folder_mail', mode='before')
+    def validate_custom_folder(cls, v):
+        if v is None:
+            return v
+        # Aquí puedes agregar validaciones específicas para la carpeta personalizada
+        v = v.replace('\\', '/')
+        folder_regex = r'^[\w]+(\/[\w]+)*$'
+        if not re.match(folder_regex, v):
+            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
+        return v
+    
+    @model_validator(mode='after')
+    def check_dependencies_values(cls, v):
+        if v.download_attachments and v.attachments_settings is None:
+            raise ValueError("Si download_attachments es True, se debe especificar attachments_settings.")
+        
+        if not v.download_attachments and v.attachments_settings is not None:
+            v.attachments_settings = None  # Ignorar attachments_settings si no se van a descargar adjuntos
+            
+        return v
+
+class EmailAttachmentInfo(BaseModel):
+    file_path: str
+    display_name: Optional[str] = None
+    type: Optional[OUTLOOKTYPEATTACHMENTS] = OUTLOOKTYPEATTACHMENTS.RegularAttachment
+    position: Optional[int] = 0  # Posición en el cuerpo del email si es un objeto embebido
+    
+    @ field_validator('file_path', mode='before')
+    def validate_files_path(cls, v):
+        if not isinstance(v, str):
+            raise ValueError("file_path debe ser una cadena.")
+        v = v.replace('\\', '/')
+        file_regex = r'^[\w\:\.]+(\/[\w\:\.-]+)+$'
+        if not re.match(file_regex, v):
+            raise ValueError("La ruta solo puede contener letras, números, guion bajo y '/'. Para separar subcarpetas se debe usar '/'.")
+        
+        return v
 
 
+class DataSendEmail(BaseModel):
+    subject: str
+    body: str
+    to_recipients_email: list[str] = []  # Lista de emails del destinatario
+    cc_recipients_email: Optional[list[str]] = None  # Lista de emails en copia
+    bcc_recipients_email: Optional[list[str]] = None  # Lista de emails en copia oculta
+    importance_email: Optional[IMPORTANCEEMAIL] = IMPORTANCEEMAIL.NORMAL  # IMPORTANCEEMAIL Enum
+    attachments: Optional[list[EmailAttachmentInfo]] = None  # Lista de adjuntos
+    is_html: Optional[bool] = False  # El cuerpo del email es HTML
+    read_receipt: Optional[bool] = False  # Solicitar acuse de recibo
+    delivery_receipt: Optional[bool] = False  # Solicitar acuse de entrega
+    send_on_behalf: Optional[str] = None  # Enviar en nombre de otro usuario (debe tener permisos)
+    save_copy_sent_items: Optional[bool] = True  # Guardar una copia en la carpeta de elementos enviados
+    connection_info: Optional[ConnectionInfo] = None  # Si es None, se usa el correo autenticado
+    
+    @field_validator('to_recipients', 'cc_recipients', 'bcc_recipients', mode='before')
+    def validate_email_format(cls, v):
+        if v is None:
+            return v
+        email_regex = r'^[\w\.-]+@[\w\.-]+\.[a-zA-Z\.]+$'
+        if isinstance(v, list):
+            for email in v:
+                if not re.match(email_regex, email):
+                    raise ValueError(f"Email inválido: {email}")
+        else:
+            if not re.match(email_regex, v):
+                raise ValueError(f"Email inválido: {v}")
+        return v
+    
+    @model_validator(mode='after')
+    def check_if_boyd_html(cls, values):
+        body = values.body
+        # 1. Etiquetas completas: <div>...</div>, <p>...</p>, etc.
+        html_tag_pair = r'<([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?>.*?</\1>'
+        # 2. Etiquetas de apertura o auto-cerradas: <br>, <img ...>, <hr>, <input ...>, etc.
+        html_tag_single = r'<[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?/?>'
+
+        if body and (re.search(html_tag_pair, body, re.IGNORECASE | re.DOTALL) or re.search(html_tag_single, body, re.IGNORECASE)):
+            values.is_html = True
+        else:
+            values.is_html = False
         return values

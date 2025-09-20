@@ -29,4 +29,8 @@ class AuthOutlook(AuthInterface):
     def get_namespace(self):
         return self._namespace
     
+    @property
+    def get_application(self):
+        return self._outlook
+    
     

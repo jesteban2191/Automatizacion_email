@@ -18,4 +18,7 @@ class AuthContext:
     def get_namespace(self):
         return self._auth_strategy.get_namespace
     
+    def get_application(self):
+        return self._auth_strategy.get_application
+    
     

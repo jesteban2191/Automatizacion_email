@@ -1,5 +1,5 @@
 from .auth import AuthContext
-from .common import ConnectionInfo, CredentialsInfoPath, PermisosGmail, DataGetEmails, DataFiltersEmails, OutlookStandarFolders, DataEmails, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments
+from .common import ConnectionInfo, CredentialsInfoPath, PermisosGmail, DataGetEmails, DataFiltersEmails, OutlookStandarFolders, DataEmails, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments, DataSendEmail, OUTLOOKTYPEELEMENT, EmailAttachmentInfo, OUTLOOKTYPEATTACHMENTS
 from .EmailHandler import OutlookEmail, EmailContext
 __all__ = ["AuthContext", 
            "ConnectionInfo", 
@@ -11,7 +11,11 @@ __all__ = ["AuthContext",
            "OutlookStandarFolders", 
            "DataEmails", 
            "OutlookEmail",
-            "EmailContext",
+           "EmailContext",
            "IMPORTANCEEMAIL", 
            "LOGICOPERATOR", 
-           "SUBJECTPREFIX"]
+           "SUBJECTPREFIX",
+           "DataSendEmail",
+           "OUTLOOKTYPEELEMENT",
+           "EmailAttachmentInfo",
+           "OUTLOOKTYPEATTACHMENTS"]
