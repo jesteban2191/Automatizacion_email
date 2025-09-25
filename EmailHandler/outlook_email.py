@@ -78,7 +78,7 @@ class OutlookEmail(EmailInterface):
         #####               Obtengo los emails según los parámetros                     #########
         #########################################################################################
 
-        folder = self.validate_folder(self, self.standard_folders, self.custom_folder)
+        folder = self.validate_folder(self.standard_folders, self.custom_folder)
         
         
         if self.query:
@@ -247,7 +247,7 @@ class OutlookEmail(EmailInterface):
                             Tiempo en descarga de datos --> {segundos_a_horas_minutos_segundos(tiempo_descarga_acumulado)}
                     --------------------------------------------------------------------------------------------------""")
             
-            
+            email_data['Attachment_Folder'] = str(folder_path) if folder_path else "No folder created"
             emails.append(email_data)
             
         df_emails = pd.DataFrame(emails)
@@ -640,177 +640,29 @@ class OutlookEmail(EmailInterface):
     #################################################################################################################################
     def get_path_folders(self) -> list:
         list_paths = []
-        for i in range(1, self._conn.Folders.Count + 1):
-            store = self._conn.Folders[i]
-            if self.store_folder == store.Name:
+        stores = self._conn.Folders
+        stores_names = [store.Name for store in stores]
+        print(f"Stores disponibles: {stores_names}")
+        store_name = [store for store in stores_names if store == self.store_folder]
+        store = next((s for s in stores if s.Name == self.store_folder), None)
+        if store: 
+            list_paths = [f"{self.store_folder}\\{folder.Name}" for folder in store.Folders]
+            print(f"Folders disponibles en: {list_paths}")
+        # for i in range(1, self._conn.Folders.Count + 1):
+        #     store = self._conn.Folders[i]
+        #     print(f"Store: {store.Name} index {i}")
+        #     if self.store_folder == store.Name:
                 
-                for j in range(1, store.Folders.Count + 1):
-                    folder = store.Folders[j]
-                    path = f"{store.Name}\\{folder.Name}"
-                    list_paths.append(path)
-                    #print(f"  Carpeta: {folder.Name} - Path: {path}")
+        #         for j in range(1, store.Folders.Count + 1):
+        #             try:
+        #                 folder = store.Folders[j]
+        #                 path = f"{store.Name}\\{folder.Name}"
+        #                 list_paths.append(path)
+        #             except Exception as e:
+        #                 print(f"Error accediendo a folder index {j}: {e}")
+        #             #print(f"  Carpeta: {folder.Name} - Path: {path}")
             
         return list_paths
-    
-    #################################################################################################################################
-    #####                          Función para descargar el adjunto de los correos solicitados                             #########
-    #################################################################################################################################
-    def download_attachments(self, datadownloadattachments: DataDownloadAttachments):
-        
-        start = time()
-        #########################################################################################
-        #####     Obtengo todos los parámetros para descagar los adjuntos de los emails #########
-        #########################################################################################
-        self.store_folder = datadownloadattachments.store_folder if datadownloadattachments.store_folder else self.authenticated_email
-        self.path_download_folder = Path(datadownloadattachments.download_folder)
-        self.path_download_folder.mkdir(parents=True, exist_ok=True)
-        self.overwrite = datadownloadattachments.overwrite
-        self.mark_as_read = datadownloadattachments.mark_as_read
-        self.only_filenames = datadownloadattachments.only_filenames or []
-        self.only_extensions = datadownloadattachments.only_extensions or []
-        self.ignore_extensions = datadownloadattachments.ignore_extensions or []
-        self.ignore_filenames = datadownloadattachments.ignore_filenames or []
-        self.create_subfolder_per_email = datadownloadattachments.create_subfolder_per_email
-        self.standard_folders = datadownloadattachments.standard_folder
-        self.custom_folder = datadownloadattachments.custom_folder
-        self.subfolder_name = datadownloadattachments.name_subfolder_per_email if datadownloadattachments.name_subfolder_per_email else "{index}_{subject}_{receiveddate}"
-
-        #########################################################################################
-        #####               Creo el query para obtener los emails                       #########
-        #########################################################################################
-        self.datafilter = datadownloadattachments.filters
-        self.query = self.create_query(self.datafilter) if self.datafilter else None
-        if not self.query:
-            raise ValueError("No se pudo crear la consulta DASL para filtrar los correos por ID.")
-        
-        folder = self.validate_folder(self.standard_folders, self.custom_folder)
-                
-        filtered_messages = folder.Items.Restrict(self.query)
-        self.tiempo_transformacion_datos = time() - start
-        tiempo_transformacion_datos_acumulado = self.tiempo_transformacion_datos + self.tiempo_transformacion_datos_acumulado
-        tiempo_transformacion_datos = segundos_a_horas_minutos_segundos(tiempo_transformacion_datos_acumulado)
-        self.total_adjuntos = self.count_att_filtered(filtered_messages, self.only_extensions, self.only_filenames, self.ignore_extensions, self.ignore_filenames)
-        self.total_emails = filtered_messages.Count
-        
-        
-        
-        
-        
-        email_download_list = []
-        start=time()
-
-        for i, messages in enumerate(filtered_messages):
-            attachments_files = []
-            attachments_filenames = [getattr(att, 'FileName', None) for att in getattr(messages, 'Attachments', []) if getattr(att, 'FileName', None) is not None]
-            
-            attachments_files = [
-                att for att in attachments_filenames
-                if att is not None
-                and not any(att.endswith(ext) for ext in self.ignore_extensions)
-                and att not in self.ignore_filenames
-            ]
-
-            # Si hay filtros de inclusión, aplicar
-            if self.only_extensions or self.only_filenames:
-                attachments_files = [
-                    att for att in attachments_files
-                    if (any(att.endswith(ext) for ext in self.only_extensions) 
-                        or att in self.only_filenames)
-                ]
-
-            
-                
-            
-                  
-            email_data={
-                'MessageID': getattr(messages, 'EntryID', None),
-                'Subject': remove_emojis(getattr(messages, 'Subject', None)),
-                'ReceivedTime': format_date_folder(getattr(messages, 'ReceivedTime', None), DateTypes.DATETIME.value),
-                'Num_of_Attachments': getattr(getattr(messages, 'Attachments', None), 'Count', 0),
-                'IsRead': getattr(messages, 'UnRead', None) == 0,
-                'Attachments': attachments_files,
-                
-            }
-            subfolder_name = self.subfolder_name
-            
-            if "{subject}" in subfolder_name:
-                subfolder_name = subfolder_name.replace("{subject}", email_data.get('Subject', 'No_Subject').strip() or 'No_Subject')
-            if "{recivedtime}" in subfolder_name:
-                subfolder_name = subfolder_name.replace("{recivedtime}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value))
-            if "{reciveddate}" in subfolder_name:
-                subfolder_name = subfolder_name.replace("{reciveddate}", format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATE.value))
-            if "{sender_mail}" in subfolder_name:
-                subfolder_name = subfolder_name.replace("{sender_mail}", self.get_sender_str(messages).strip() or 'No_Sender')
-            if "{index}" in subfolder_name:
-                subfolder_name = subfolder_name.replace("{index}", str(i + 1))
-
-            self.email_folder = f"{subfolder_name}".strip() or f"{i+1}_{email_data.get('Subject', 'No_Subject').strip() or 'No_Subject'}_{format_date_folder(getattr(messages, 'ReceivedTime', datetime.now()), DateTypes.DATETIME.value)}"
-
-            self.folder_path = self.path_download_folder / (self.email_folder if self.create_subfolder_per_email else "")
-            self.folder_path.mkdir(parents=True, exist_ok=True)
-            
-            email_data['Folder_path'] = str(self.folder_path)
-
-            
-
-
-            self.file_paths = [self.folder_path / f"{file_name}" for file_name in email_data['Attachments']]
-            
-            if i == 0:
-                total_att_downloaded = 0
-                current_att_downloaded = 0
-
-            for j, dest_path in enumerate(self.file_paths):
-                if dest_path.exists() and not self.overwrite:
-                    #print(f"El archivo {dest_path} ya existe y overwrite está establecido en False. Saltando descarga.")
-                    continue
-                elif dest_path.exists() and self.overwrite:
-                    #print(f"El archivo {dest_path} ya existe pero overwrite está establecido en True. Sobrescribiendo archivo.")
-                    dest_path.unlink()
-                
-                try:
-                    attachment = next((att for att in getattr(messages, 'Attachments', []) if getattr(att, 'FileName', None) == dest_path.name), None)
-                    if attachment:
-                        attachment.SaveAsFile(str(dest_path))
-                        self.tiempo_descarga_adjuntos = time() - start
-                        
-                                    #print(f"Adjunto guardado: {dest_path}")
-                    #else:
-                    #    print(f"No se encontró el adjunto {dest_path.name} en el correo {email_data['MessageID']}.")
-                except Exception as e:
-                    raise Exception(f"Error al guardar el adjunto {dest_path}: {e}")
-                
-                os.system('cls' if os.name == 'nt' else 'clear')
-                current_att_downloaded = 1 + j
-                total_att_downloaded += current_att_downloaded
-                
-                self.tiempo_descarga_adjuntos = time() - start
-
-                print(f"""
-                            ---------------------------------------------------------------------------------------------------------
-                                Total Emails to download --> {self.total_emails}, Total Attachments --> {self.total_adjuntos}
-                                folder_name --> {self.email_folder}
-                                Email downloaded --> {i + 1} of {self.total_emails} ({round(((i + 1)/self.total_emails)*100,2)}%)
-                                Attachments downloaded --> {total_att_downloaded} of {self.total_adjuntos} ({round(((total_att_downloaded)/self.total_adjuntos)*100,2)}%)
-                                Tiempo en tratamiento de datos --> {tiempo_transformacion_datos}
-                                Tiempo en descarga de adjuntos --> {segundos_a_horas_minutos_segundos(self.tiempo_descarga_adjuntos)}
-                            ---------------------------------------------------------------------------------------------------------""")
-
-            if self.mark_as_read and not email_data['IsRead']:
-                try:
-                    messages.UnRead = False
-                    messages.Save()
-                    #print(f"El correo {email_data['MessageID']} ha sido marcado como leído.")
-                except Exception as e:
-                    raise Exception(f"Error al marcar el correo {email_data['MessageID']} como leído: {e}")
-            
-            
-
-            email_download_list.append(email_data)
-    
-        df_emails_attachments = pd.DataFrame(email_download_list)
-        
-        return df_emails_attachments
     
     
     #################################################################################################################################
@@ -896,20 +748,20 @@ class OutlookEmail(EmailInterface):
         #########################################################################################
         #####     Obtengo todos los parámetros para enviar los emails con o sin adjuntos #########
         #########################################################################################
-        self.subject = DataSendEmail.subject if DataSendEmail.subject else "No Subject"
-        self.body = DataSendEmail.body if DataSendEmail.body else ""
-        self.to_recipients = DataSendEmail.to_recipients_email if DataSendEmail.to_recipients_email else []
-        self.cc_recipients = DataSendEmail.cc_recipients_email if DataSendEmail.cc_recipients_email else []
-        self.bcc_recipients = DataSendEmail.bcc_recipients_email if DataSendEmail.bcc_recipients_email else []
-        self.importance_email = DataSendEmail.importance_email if DataSendEmail.importance_email else IMPORTANCEEMAIL.NORMAL
-        self.attachments = DataSendEmail.attachments if DataSendEmail.attachments else []
-        self.is_html = DataSendEmail.is_html
+        self.subject = datasentemail.subject if datasentemail.subject else "No Subject"
         self.body = datasentemail.body if datasentemail.body else ""
-        self.read_receipt = DataSendEmail.read_receipt
-        self.delivery_receipt = DataSendEmail.delivery_receipt # Solicitar acuse de entrega
-        self.send_on_behalf = DataSendEmail.send_on_behalf # Enviar en nombre de otro usuario (debe tener permisos)
-        self.save_copy_sent_items = DataSendEmail.save_copy_sent_items # Guardar una copia en la carpeta de elementos enviados
-        self.connection_info = DataSendEmail.connection_info
+        self.to_recipients = datasentemail.to_recipients_email if datasentemail.to_recipients_email else []
+        self.cc_recipients = datasentemail.cc_recipients_email if datasentemail.cc_recipients_email else []
+        self.bcc_recipients = datasentemail.bcc_recipients_email if datasentemail.bcc_recipients_email else []
+        self.importance_email = datasentemail.importance_email if datasentemail.importance_email else IMPORTANCEEMAIL.NORMAL
+        self.attachments = datasentemail.attachments if datasentemail.attachments else []
+        self.is_html = datasentemail.is_html
+        self.body = datasentemail.body if datasentemail.body else ""
+        self.read_receipt = datasentemail.read_receipt
+        self.delivery_receipt = datasentemail.delivery_receipt # Solicitar acuse de entrega
+        self.send_on_behalf = datasentemail.send_on_behalf # Enviar en nombre de otro usuario (debe tener permisos)
+        self.save_copy_sent_items = datasentemail.save_copy_sent_items # Guardar una copia en la carpeta de elementos enviados
+        self.connection_info = datasentemail.connection_info
 
         #########################################################################################
         #####               Creo el objeto del email nuevo                              #########
@@ -963,8 +815,7 @@ class OutlookEmail(EmailInterface):
             'SentOnBehalfOfName': self.send_on_behalf if self.send_on_behalf else self.get_sender_str(email)
         }
         email.Send()
-        email_sent['SentTime'] = format_datetime(getattr(email, 'SentOn', datetime.now()))
-        email_sent['MessageID'] = getattr(email, 'EntryID', None)
+        email_sent['SentTime'] = format_datetime(datetime.now())
         df_email_sent = pd.DataFrame([email_sent])
             
         return df_email_sent

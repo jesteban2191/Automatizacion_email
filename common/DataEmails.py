@@ -353,7 +353,7 @@ class EmailAttachmentInfo(BaseModel):
 class DataSendEmail(BaseModel):
     subject: str
     body: str
-    to_recipients_email: list[str] = []  # Lista de emails del destinatario
+    to_recipients_email: list[str]  # Lista de emails del destinatario
     cc_recipients_email: Optional[list[str]] = None  # Lista de emails en copia
     bcc_recipients_email: Optional[list[str]] = None  # Lista de emails en copia oculta
     importance_email: Optional[IMPORTANCEEMAIL] = IMPORTANCEEMAIL.NORMAL  # IMPORTANCEEMAIL Enum
@@ -364,8 +364,8 @@ class DataSendEmail(BaseModel):
     send_on_behalf: Optional[str] = None  # Enviar en nombre de otro usuario (debe tener permisos)
     save_copy_sent_items: Optional[bool] = True  # Guardar una copia en la carpeta de elementos enviados
     connection_info: Optional[ConnectionInfo] = None  # Si es None, se usa el correo autenticado
-    
-    @field_validator('to_recipients', 'cc_recipients', 'bcc_recipients', mode='before')
+
+    @field_validator('to_recipients_email', 'cc_recipients_email', 'bcc_recipients_email', mode='before')
     def validate_email_format(cls, v):
         if v is None:
             return v

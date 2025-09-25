@@ -1,6 +1,7 @@
 from .auth import AuthContext
 from .common import ConnectionInfo, CredentialsInfoPath, PermisosGmail, DataGetEmails, DataFiltersEmails, OutlookStandarFolders, DataEmails, IMPORTANCEEMAIL, LOGICOPERATOR, SUBJECTPREFIX, DataDownloadAttachments, DataSendEmail, OUTLOOKTYPEELEMENT, EmailAttachmentInfo, OUTLOOKTYPEATTACHMENTS
 from .EmailHandler import OutlookEmail, EmailContext
+from .Orchestrator import Orchestrator_email
 __all__ = ["AuthContext", 
            "ConnectionInfo", 
            "CredentialsInfoPath", 
@@ -18,4 +19,5 @@ __all__ = ["AuthContext",
            "DataSendEmail",
            "OUTLOOKTYPEELEMENT",
            "EmailAttachmentInfo",
-           "OUTLOOKTYPEATTACHMENTS"]
+           "OUTLOOKTYPEATTACHMENTS",
+           "Orchestrator_email"]

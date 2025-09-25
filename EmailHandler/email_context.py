@@ -1,11 +1,12 @@
+from Automatizacion_email.common.DataEmails import DataSendEmail
 from .outlook_email import OutlookEmail
 from ..common import DataGetEmails, DataFiltersEmails, DataDownloadAttachments
 import win32com.client
 
 class EmailContext:
-    def __init__(self, conn):
+    def __init__(self, conn, application=None):
         if hasattr(conn, "_oleobj_") and hasattr(conn, "GetDefaultFolder"):
-            self.email_handler = OutlookEmail(conn)
+            self.email_handler = OutlookEmail(conn, application)
         else:
             raise ValueError("El objeto de conexión no es válido. Debe ser un objeto Outlook autenticado.")
         
@@ -16,7 +17,6 @@ class EmailContext:
     def create_query(self, datafiltersemails: DataFiltersEmails):
         return self.email_handler.create_query(datafiltersemails)
     
-    def download_attachments(self, datadownloadattachments: DataDownloadAttachments):
-        return self.email_handler.download_attachments(datadownloadattachments)
-    
-    
+    def send_email(self, datasentemail: DataSendEmail):
+        return self.email_handler.send_email(datasentemail)
+
