@@ -1,9 +1,11 @@
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from ..common import ConnectionInfo
+import tzlocal
+import pytz
 
 class OutlookStandarFolders(int, Enum):
     INBOX = 6  # Inbox
@@ -231,13 +233,24 @@ class DataFiltersEmails(BaseModel):
     def validate_date_format(cls, v):
         if v is None:
             return v
-        try: 
-            dt = datetime.strptime(v, '%d/%m/%Y %H:%M:%S')
-        except Exception:
-            try:
-                dt = datetime.strptime(v, '%d/%m/%Y')
+        local_tz = tzlocal.get_localzone()
+        if isinstance(v, datetime):
+            if v.tzinfo is not None:
+                dt = v.astimezone(local_tz).replace(tzinfo=None)
+            else:
+                dt = v.replace(tzinfo=None)
+        else:
+            try: 
+                dt_sin_zona = datetime.strptime(v, '%d/%m/%Y %H:%M:%S')
+                dt = datetime(dt_sin_zona.year, dt_sin_zona.month, dt_sin_zona.day, 0, 0, 0, tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
             except Exception:
-                raise ValueError(f"El formato de fecha debe ser 'dd/mm/yyyy hh:mm:ss'. Valor recibido: {v}")
+                try:
+                    dt_sin_zona = datetime.strptime(v, '%d/%m/%Y')
+                    dt = datetime(dt_sin_zona.year, dt_sin_zona.month, dt_sin_zona.day, 0, 0, 0, tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
+                except Exception:
+                    raise ValueError(f"El formato de fecha debe ser 'dd/mm/yyyy hh:mm:ss'. Valor recibido: {v}")
+            
+            
         return dt  # ¡Siempre retorna el valor!
     
 

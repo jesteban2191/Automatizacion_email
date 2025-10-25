@@ -236,6 +236,7 @@ class OutlookEmail(EmailInterface):
                 #########################################################################################
                 #####    En caso de no tener que descargar adjuntos                             #########
                 #########################################################################################
+                folder_path = None
                 self.tiempo_descarga = time() - start
                 tiempo_descarga_acumulado = self.tiempo_descarga_acumulado + self.tiempo_descarga
                 os.system('cls')
@@ -330,8 +331,8 @@ class OutlookEmail(EmailInterface):
         self.body = datafilters.body
         self.has_attachments = datafilters.has_attachments
         self.is_read = datafilters.is_read
-        self.received_after = datafilters.received_after
-        self.received_before = datafilters.received_before
+        self.received_after = datafilters.received_after.replace(tzinfo=None) if datafilters.received_after else None
+        self.received_before = datafilters.received_before.replace(tzinfo=None) if datafilters.received_before else None
         self.conversation_topic = datafilters.conversation_topic
         self.referenceid = datafilters.referenceid
         self.msg_id = datafilters.msg_id
@@ -430,19 +431,23 @@ class OutlookEmail(EmailInterface):
             query_parts.append(f"({QUERYDASL.IS_READ_IPM_NOTE.value} = {is_read_value})")
 
         if self.received_after and self.received_before:
+            fec_after = self.received_after.strftime('%m/%d/%Y %H:%M:%S')
+            fec_before = self.received_before.strftime('%m/%d/%Y %H:%M:%S')
             if self.received_after > self.received_before:
                 raise ValueError("received_after no puede ser mayor que received_before")
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}' "
-                f"AND {QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{fec_after}' "
+                f"AND {QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{fec_before}')"
             )
         elif self.received_after:
+            fec_after = self.received_after.strftime('%m/%d/%Y %H:%M:%S')
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{self.received_after.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} >= '{fec_after}')"
             )
         elif self.received_before:
+            fec_before = self.received_before.strftime('%m/%d/%Y %H:%M:%S')
             date_filter = (
-                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{self.received_before.strftime('%m/%d/%Y %H:%M:%S')}')"
+                f"({QUERYDASL.RECEIVED_TIME_IPM_NOTE.value} <= '{fec_before}')"
             )
         else:
             date_filter = None
